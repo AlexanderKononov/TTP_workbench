@@ -1,0 +1,44 @@
+{
+  "tracks": [
+    {
+      "asset_type": "stock",
+      "ticker": "AAPL",
+      "resolution": "1d"
+    },
+    {
+      "asset_type": "stock",
+      "ticker": "AAPL",
+      "resolution": "1h"
+    },
+    {
+      "asset_type": "stock",
+      "ticker": "AAPL",
+      "resolution": "30m"
+    },
+    {
+      "asset_type": "stock",
+      "ticker": "AAPL",
+      "resolution": "1m"
+    },
+    {
+      "asset_type": "stock",
+      "ticker": "TSLA",
+      "resolution": "1d"
+    },
+    {
+      "asset_type": "crypto",
+      "ticker": "BTC-USD",
+      "resolution": "1h"
+    },
+    {
+      "asset_type": "crypto",
+      "ticker": "ETH-USD",
+      "resolution": "1d"
+    },
+    {
+      "asset_type": "stock",
+      "ticker": "BTC-USD",
+      "resolution": "1h"
+    }
+  ]
+}
