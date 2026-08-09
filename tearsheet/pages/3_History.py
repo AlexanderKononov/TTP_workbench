@@ -5,12 +5,14 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.auth import require_login
+from src.auth import current_user
 from src.session_store import list_sessions
 
-st.set_page_config(page_title="History - Trading Tearsheet", layout="wide")
-
-username, name = require_login()
+username = current_user()
+if not username:
+    st.info("Please log in from the home page.")
+    st.stop()
+name = username
 
 st.title("History")
 st.caption(f"All sessions uploaded by **{name}** during this server run.")
