@@ -9,12 +9,13 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from src.auth import require_login
+from src.auth import current_user
 from src.session_store import list_participants, list_sessions
 
-st.set_page_config(page_title="Compare - Trading Tearsheet", layout="wide")
-
-require_login()
+username = current_user()
+if not username:
+    st.info("Please log in from the home page.")
+    st.stop()
 
 st.title("Participant Comparison")
 

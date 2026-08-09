@@ -3,15 +3,18 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.auth import require_login
-from src.parsing import FORMAT_FILLS, FORMAT_TRADES, UnsupportedFileFormatError, load_upload
+from src.auth import current_user
+from src.matching import match_fills_to_trades
+from src.parsing import FORMAT_FILLS, UnsupportedFileFormatError, load_upload
 from src.report import render_trade_report
 from src.session_store import add_session
 from src.statistics import compute_stats
 
-st.set_page_config(page_title="Upload - Trading Tearsheet", layout="wide")
-
-username, name = require_login()
+username = current_user()
+if not username:
+    st.info("Please log in from the home page.")
+    st.stop()
+name = username
 
 st.title("Upload Session")
 st.caption(f"Uploading as **{name}**.")
@@ -35,24 +38,40 @@ except Exception as exc:  # malformed CSV, encoding issues, etc.
     st.stop()
 
 if fmt == FORMAT_FILLS:
-    st.warning(
-        "This looks like a raw fills export (individual order executions), not a "
-        "closed-trades export. Trade-level statistics require matching fills into "
-        "round-trip trades, which isn't implemented yet - showing the raw fill "
-        "blotter only. Upload the 'closed trades' export instead to see full stats. "
-        "This file is not saved to your session history."
-    )
-    st.subheader("Fills")
-    st.dataframe(data, use_container_width=True)
-    st.download_button(
-        "Download parsed fills (CSV)",
-        data=data.to_csv(index=False).encode("utf-8"),
-        file_name="parsed_fills.csv",
-        mime="text/csv",
-    )
-    st.stop()
+    fills = data
+    trades, open_positions = match_fills_to_trades(fills)
 
-trades = data
+    st.caption(
+        f"Fills export: matched {len(trades)} closed round-trip trade(s) from "
+        f"{len(fills)} fills via FIFO netting per symbol (oldest lots closed first)."
+    )
+
+    if not open_positions.empty:
+        st.warning(
+            f"{len(open_positions)} symbol(s) still have an open position at the end of "
+            "this file (fills never netted back to zero), so no realized PnL exists for "
+            "them yet - excluded from statistics below."
+        )
+        st.dataframe(open_positions, use_container_width=True)
+
+    with st.expander("Raw fills used for this match"):
+        st.dataframe(fills, use_container_width=True)
+        st.download_button(
+            "Download parsed fills (CSV)",
+            data=fills.to_csv(index=False).encode("utf-8"),
+            file_name="parsed_fills.csv",
+            mime="text/csv",
+        )
+
+    if trades.empty:
+        st.info(
+            "No closed round-trip trades could be matched from this file - every "
+            "position is still open. This file is not saved to your session history."
+        )
+        st.stop()
+else:
+    trades = data
+
 stats = compute_stats(trades)
 
 # Streamlit reruns this whole script on every interaction, and the uploaded
