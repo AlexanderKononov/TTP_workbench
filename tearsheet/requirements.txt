@@ -4,5 +4,3 @@ numpy
 plotly
 pyarrow
 pytest
-streamlit-authenticator
-pyyaml
