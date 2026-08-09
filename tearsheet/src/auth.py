@@ -1,101 +1,48 @@
-"""Login gate backed by streamlit-authenticator.
+"""Minimal login gate for the app's 2 known users.
 
-Credentials come from one of two places:
-
-- Streamlit Secrets (st.secrets["auth"]) when deployed to Streamlit Cloud -
-  set these in the app's Settings > Secrets, never committed to git.
-- A local auth_config.yaml (gitignored) for local development - see
-  auth_config.example.yaml for the template.
-
-v1 auth per BUILD_PLAN.md §5: two known users, no public registration - add
-or change users with scripts/hash_password.py. Replace with Supabase Auth in
-Phase 3/5 when the app moves off a single machine.
+By explicit request this is intentionally as simple as possible: a fixed
+username/password pair per person, checked in-process, no hashing/cookies/
+external config. This is a name-gate, not real security - fine for a
+private 2-person tool, not for anything sensitive. Session state resets on
+page reload (no persistent cookie), which is an accepted trade-off for the
+simplicity.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import streamlit as st
-import streamlit_authenticator as stauth
-import yaml
-from streamlit.errors import StreamlitSecretNotFoundError
 
-CONFIG_PATH = Path(__file__).resolve().parents[1] / "auth_config.yaml"
-EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[1] / "auth_config.example.yaml"
-
-
-def _load_config_from_secrets() -> dict | None:
-    try:
-        if "auth" not in st.secrets:
-            return None
-    except StreamlitSecretNotFoundError:
-        return None
-
-    auth_secrets = st.secrets["auth"]
-    return {
-        "credentials": {
-            "usernames": {
-                username: dict(user_data)
-                for username, user_data in auth_secrets["credentials"]["usernames"].items()
-            }
-        },
-        "cookie": dict(auth_secrets["cookie"]),
-    }
-
-
-def _load_config() -> dict:
-    from_secrets = _load_config_from_secrets()
-    if from_secrets is not None:
-        return from_secrets
-
-    if not CONFIG_PATH.exists():
-        st.error(
-            f"No login credentials found. Either set Streamlit Secrets under "
-            f"the `auth` key (see .streamlit/secrets.toml.example), or copy "
-            f"`{EXAMPLE_CONFIG_PATH.name}` to `{CONFIG_PATH.name}` for local "
-            "development (see the comments in the example file)."
-        )
-        st.stop()
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def get_authenticator() -> stauth.Authenticate:
-    # Not cached: Authenticate() creates a cookie-manager widget internally,
-    # and Streamlit forbids widget creation inside @st.cache_* functions.
-    # Reading+building this fresh each rerun is cheap for a 2-user YAML file.
-    config = _load_config()
-    return stauth.Authenticate(
-        config["credentials"],
-        config["cookie"]["name"],
-        config["cookie"]["key"],
-        config["cookie"]["expiry_days"],
-    )
+USERS = {
+    "Alx": "Alx",
+    "Ars": "Ars",
+}
 
 
 def require_login() -> tuple[str, str]:
-    """Render the login form (if needed) and stop execution unless logged in.
+    """Render a login form (if needed) and stop execution unless logged in.
 
-    Returns (username, display_name) once authenticated.
+    Returns (username, username) once authenticated - kept as a pair for
+    compatibility with pages that unpack (username, display_name).
     """
-    authenticator = get_authenticator()
+    username = st.session_state.get("auth_user")
+    if username:
+        with st.sidebar:
+            st.caption(f"Logged in as **{username}**")
+            if st.button("Log out"):
+                del st.session_state["auth_user"]
+                st.rerun()
+        return username, username
 
-    if st.session_state.get("authentication_status") is not True:
-        authenticator.login(location="main")
+    st.title("Log in")
+    with st.form("login_form"):
+        entered_username = st.text_input("Username")
+        entered_password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Log in")
 
-    status = st.session_state.get("authentication_status")
-    if status is False:
-        st.error("Username or password is incorrect.")
-        st.stop()
-    if status is None:
-        st.info("Please log in to continue.")
-        st.stop()
+    if submitted:
+        if USERS.get(entered_username) == entered_password:
+            st.session_state["auth_user"] = entered_username
+            st.rerun()
+        else:
+            st.error("Incorrect username or password.")
 
-    username = st.session_state["username"]
-    name = st.session_state["name"]
-
-    with st.sidebar:
-        st.caption(f"Logged in as **{name}**")
-        authenticator.logout("Log out", location="sidebar")
-
-    return username, name
+    st.stop()

@@ -3,8 +3,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
-auth_config.yaml
-.streamlit/secrets.toml
 data*
 data/*
 *.csv
