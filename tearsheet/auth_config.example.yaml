@@ -1,0 +1,27 @@
+# Template for auth_config.yaml (the real file is gitignored, never commit it).
+#
+# Setup:
+#   1. Copy this file to auth_config.yaml.
+#   2. Change the two usernames/names/emails below to the real participants.
+#   3. Generate a real password hash for each user:
+#        python scripts/hash_password.py "your-new-password"
+#      and paste the result over the placeholder `password` value.
+#   4. Change `cookie.key` to a random string (any long random text is fine).
+#
+# The placeholder password below is "changeme123" - do not use it for real.
+
+credentials:
+  usernames:
+    alexander:
+      name: Alexander
+      email: alexander@example.com
+      password: $2b$12$y9stMbGkOF.RJyHQm8Z4oeVxmrQBu9QJ6VHAJNS8k7w/gzZC.SX/q
+    friend:
+      name: Friend
+      email: friend@example.com
+      password: $2b$12$y9stMbGkOF.RJyHQm8Z4oeVxmrQBu9QJ6VHAJNS8k7w/gzZC.SX/q
+
+cookie:
+  name: tearsheet_auth
+  key: change_this_to_a_random_secret
+  expiry_days: 30
