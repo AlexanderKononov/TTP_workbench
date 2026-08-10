@@ -12,8 +12,8 @@ def compute_daily_activity(sessions: list[dict], as_of: pd.Timestamp | None = No
     """Build a one-row-per-day activity table spanning a user's history.
 
     Each session dict is expected to have the shape produced by
-    session_store.add_session/list_sessions: "trades" (a DataFrame with a
-    trade_time column), "uploaded_at" (datetime), "file_name" (str).
+    database.list_sessions: "trades" (a DataFrame with a trade_time column),
+    "uploaded_at" (datetime), "file_name" (str).
 
     The date range runs from the earliest trade/upload through as_of
     (defaults to today), with zero-filled gap days included - gaps are the
