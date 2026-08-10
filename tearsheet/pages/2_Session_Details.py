@@ -11,8 +11,8 @@ import pandas as pd
 import streamlit as st
 
 from src.auth import current_user
+from src.database import list_sessions
 from src.report import render_trade_report
-from src.session_store import list_sessions
 from src.statistics import compute_stats
 
 username = current_user()

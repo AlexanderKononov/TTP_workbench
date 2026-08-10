@@ -1,8 +1,8 @@
 """Entry point: branding + login gate + shared header + page navigation.
 
-Phase 2 per BUILD_PLAN.md - multipage app with local auth. See src/auth.py
-for the login mechanism and src/session_store.py for the (in-memory, Phase-3-
-pending) session history shared across users of this running server.
+Phase 2/3 per BUILD_PLAN.md - multipage app with local auth and Supabase-
+backed persistence. See src/auth.py for the login mechanism and
+src/database.py for session/trade storage (SUPABASE_PLAN.md).
 
 This is the single script Streamlit actually runs - st.navigation() below
 dispatches to the individual page scripts in pages/, but everything above
@@ -23,7 +23,7 @@ import streamlit as st
 
 from src.activity import compute_daily_activity
 from src.auth import current_user, render_header, render_login_form, render_logo
-from src.session_store import list_sessions
+from src.database import list_sessions
 from src.visualisation import activity_timeline_chart
 
 st.set_page_config(page_title="TTP Tearsheet", layout="wide")
@@ -68,10 +68,7 @@ if username:
                 st.page_link(target, label=f"**{label}**", icon=icon)
                 st.caption(description)
 
-        st.caption(
-            "Session history currently lives in server memory only (Phase 2) and resets "
-            "on server restart - persistent storage (Supabase) is Phase 3 of the build plan."
-        )
+        st.caption("Session history is stored in Supabase and persists across server restarts.")
 
     pages = st.navigation(
         [

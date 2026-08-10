@@ -1,8 +1,8 @@
 """Side-by-side stats for both participants.
 
-Uses the shared in-process session store (src/session_store.py), so this
-only shows data uploaded while the current server process has been running -
-full cross-session history arrives with Supabase in Phase 3.
+Computed cumulatively over each participant's full trade history in
+Supabase (src.database.get_all_trades), so this is always an all-time vs.
+all-time comparison rather than a per-session average - see SUPABASE_PLAN.md.
 """
 from __future__ import annotations
 
@@ -10,7 +10,8 @@ import pandas as pd
 import streamlit as st
 
 from src.auth import current_user
-from src.session_store import list_participants, list_sessions
+from src.database import get_all_trades, list_participants
+from src.statistics import compute_stats
 
 username = current_user()
 if not username:
@@ -30,21 +31,23 @@ if len(participants) < 2:
 
 rows = []
 for p in participants:
-    sessions = list_sessions(participant=p)
-    trade_counts = [s["stats"]["trade_count"] for s in sessions]
-    net_pnls = [s["stats"]["net_pnl"] for s in sessions]
-    win_rates = [s["stats"]["win_rate"] for s in sessions]
-    drawdowns = [s["stats"]["max_drawdown"] for s in sessions]
+    trades = get_all_trades(p)
+    if trades.empty:
+        continue
+    stats = compute_stats(trades)
     rows.append(
         {
             "Participant": p,
-            "Sessions": len(sessions),
-            "Trades": sum(trade_counts),
-            "Net PnL": sum(net_pnls),
-            "Avg Win Rate": sum(win_rates) / len(win_rates),
-            "Max Drawdown": max(drawdowns),
+            "Trades": stats["trade_count"],
+            "Net PnL": stats["net_pnl"],
+            "Win Rate": stats["win_rate"],
+            "Max Drawdown": stats["max_drawdown"],
         }
     )
+
+if len(rows) < 2:
+    st.info("Need at least two participants with closed trades to compare.")
+    st.stop()
 
 comparison = pd.DataFrame(rows).set_index("Participant")
 st.dataframe(comparison, use_container_width=True)

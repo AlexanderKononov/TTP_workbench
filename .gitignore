@@ -212,3 +212,5 @@ data/processed/
 data/metadata.db
 
 .streamlit/
+!tearsheet/.streamlit/
+!tearsheet/.streamlit/secrets.toml.example

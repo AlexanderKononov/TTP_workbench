@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.auth import current_user
-from src.session_store import list_sessions
+from src.database import list_sessions
 
 username = current_user()
 if not username:
@@ -15,7 +15,7 @@ if not username:
 name = username
 
 st.title("History")
-st.caption(f"All sessions uploaded by **{name}** during this server run.")
+st.caption(f"All sessions uploaded by **{name}**.")
 
 sessions = list_sessions(participant=username)
 if not sessions:
