@@ -4,6 +4,5 @@ __pycache__/
 .pytest_cache/
 .env
 .streamlit/secrets.toml
-data*
-data/*
+/data/
 *.csv
