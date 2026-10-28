@@ -1,5 +1,7 @@
 """Command-line entry point: `ttp`."""
 
+import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -11,6 +13,8 @@ from ttp.data.downloader import download_klines
 from ttp.data.store import DATASET_NAME, DatasetStore
 from ttp.screener.universe import thin_markets
 from ttp.venues.mexc import MexcClient, MexcError
+from ttp.venues.mexc.book import BookEvent, DepthDiff, OrderBook, Trade
+from ttp.venues.mexc.stream import LiveBooks, MexcMarketStream, StreamStatus
 
 
 @click.group()
@@ -140,3 +144,88 @@ def download_klines_cmd(
             "(MEXC returned no candles for them; see the dataset card)"
         )
     click.echo(f"dataset card: {card.as_posix()}")
+
+
+@main.command()
+@click.argument("market")
+@click.option(
+    "--seconds",
+    type=click.FloatRange(min=0),
+    default=None,
+    help="Stop after this many seconds (default: run until Ctrl-C).",
+)
+@click.pass_context
+def watch(ctx: click.Context, market: str, seconds: float | None) -> None:
+    """Show the live top of book and trades of a MEXC MARKET (e.g. ADXUSDT).
+
+    The book is built from a REST snapshot and kept in sync from the WebSocket
+    depth diffs; gaps and disconnects are shown and trigger a resync.
+    """
+    market = _market(market)
+    obj = ctx.obj
+    client = obj.get("mexc") or MexcClient()
+    stream = obj.get("stream", MexcMarketStream)([market])
+    books = LiveBooks([market], client, stream)
+    clock = obj.get("clock", time.monotonic)
+    deadline = None if seconds is None else clock() + seconds
+    last_top = None
+    try:
+        with client:
+            for event in books.events():
+                line = _watch_line(event, books, last_top)
+                if line:
+                    _echo(line)
+                if isinstance(event, DepthDiff | BookEvent):
+                    book = books.book(market)
+                    top = (book.best_bid, book.best_ask) if book else None
+                    if book and top != last_top and isinstance(event, BookEvent):
+                        _echo(_top_line(event.time_ms, market, book))  # after a sync
+                    last_top = top
+                if isinstance(event, StreamStatus) and event.kind == "error":
+                    raise click.ClickException(f"MEXC stream error: {event.detail}")
+                if deadline is not None and clock() >= deadline:
+                    break
+    except MexcError as exc:
+        raise click.ClickException(str(exc)) from exc
+    except KeyboardInterrupt:
+        click.echo("stopped")
+
+
+def _watch_line(event: object, books: LiveBooks, last_top: object) -> str | None:
+    if isinstance(event, Trade):
+        return (
+            f"{_hms(event.time_ms)} {event.market} TRADE {event.side:<4} "
+            f"{event.price:g} x {event.quantity:g}"
+        )
+    if isinstance(event, DepthDiff):
+        book = books.book(event.market)
+        if book is None or (book.best_bid, book.best_ask) == last_top:
+            return None
+        return _top_line(event.time_ms, event.market, book)
+    if isinstance(event, BookEvent):
+        return (
+            f"{_hms(event.time_ms)} {event.market} {event.kind.upper()} {event.detail}"
+        )
+    if isinstance(event, StreamStatus):
+        return f"{_hms(event.time_ms)} stream {event.kind} {event.detail}".rstrip()
+    return None
+
+
+def _echo(line: str) -> None:
+    """Print a line even on a console that cannot encode the venue's text (cp1252)."""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    click.echo(line.encode(encoding, "replace").decode(encoding))
+
+
+def _top_line(time_ms: int | None, market: str, book: OrderBook) -> str:
+    bid, ask = book.best_bid, book.best_ask
+    spread = f"{(ask.price / bid.price - 1) * 100:.2f}%" if bid and ask else "n/a"
+    bid_s = f"{bid.price:g} x {bid.quantity:g}" if bid else "-"
+    ask_s = f"{ask.price:g} x {ask.quantity:g}" if ask else "-"
+    return f"{_hms(time_ms)} {market} bid {bid_s} | ask {ask_s} | spread {spread}"
+
+
+def _hms(time_ms: int | None) -> str:
+    if not time_ms:
+        return "--:--:--.---"
+    return datetime.fromtimestamp(time_ms / 1000, UTC).strftime("%H:%M:%S.%f")[:-3]

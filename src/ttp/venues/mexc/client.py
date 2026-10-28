@@ -8,6 +8,8 @@ from typing import Any, Self
 
 import httpx
 
+from ttp.venues.mexc.book import BookSnapshot, Level
+
 BASE_URL = "https://api.mexc.com"
 
 # MEXC spot v3: IP-weighted endpoints share 300 weight per 10 s; exceeding it
@@ -17,6 +19,11 @@ IP_WEIGHT_WINDOW_S = 10.0
 WEIGHT_EXCHANGE_INFO = 25
 WEIGHT_TICKER_24HR = 25
 WEIGHT_KLINES = 1
+WEIGHT_DEPTH = 3
+
+# `GET /api/v3/depth` documents `limit` up to 5000; live checks (2026-10-28)
+# returned at most 2000 levels per side.
+DEPTH_LIMIT = 5000
 
 # `GET /api/v3/klines` returns at most 500 rows per request, whatever `limit` asks.
 KLINES_PAGE_LIMIT = 500
@@ -138,6 +145,15 @@ def parse_klines(payload: list[list[Any]]) -> list[Kline]:
     ]
 
 
+def parse_depth(symbol: str, payload: dict[str, Any]) -> BookSnapshot:
+    return BookSnapshot(
+        market=symbol,
+        last_update_id=int(payload["lastUpdateId"]),
+        bids=tuple(Level(float(p), float(q)) for p, q in payload["bids"]),
+        asks=tuple(Level(float(p), float(q)) for p, q in payload["asks"]),
+    )
+
+
 class MexcClient:
     """Public MEXC spot REST endpoints, throttled by a shared weight budget."""
 
@@ -169,6 +185,15 @@ class MexcClient:
 
     def tickers_24h(self) -> list[Ticker24h]:
         return parse_tickers_24h(self._get("/api/v3/ticker/24hr", WEIGHT_TICKER_24HR))
+
+    def depth(self, symbol: str, limit: int = DEPTH_LIMIT) -> BookSnapshot:
+        """Order book snapshot with its version (`lastUpdateId`)."""
+        return parse_depth(
+            symbol,
+            self._get(
+                "/api/v3/depth", WEIGHT_DEPTH, {"symbol": symbol, "limit": limit}
+            ),
+        )
 
     def klines(
         self, symbol: str, start_ms: int, end_ms: int, interval: str = "1m"
