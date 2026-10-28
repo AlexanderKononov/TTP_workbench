@@ -32,7 +32,7 @@ The intended loop:
 
 ## Current status (2026-10-27)
 
-- **Phase: initial infrastructure.** Venue: MEXC spot ([ADR-0007](docs/adr/0007-mexc-spot-first-venue.md)). Structure: [docs/architecture.md](docs/architecture.md). First strategy: `up-spike-harvest`. Milestones M0 (venue and data feasibility), M1 (recorder), M2 (strategy interface and screener), M3 (backtest), M4 (paper trading), M5 (execution service at minimum size), M6 (first live case: $50). Spec and tickets: `.scratch/initial-infrastructure/`.
+- **Phase: initial infrastructure, M0–M2 built (2026-10-28), awaiting Owner review.** Venue: MEXC spot ([ADR-0007](docs/adr/0007-mexc-spot-first-venue.md)). Structure: [docs/architecture.md](docs/architecture.md). Built: MEXC connector (REST + own WebSocket book), kline/trade downloader, Parquet+DuckDB datasets, screener v3, Telegram reports, dataset approval with controls, recorder, event-driven engine with replay feed. Pending Owner gates: gate 2 (`up-spike-harvest` definition), gate 7 (first dataset, see `.scratch/initial-infrastructure/gate-7-recommendation.md`), merge of the M0–M2 PR. Next: M3 (backtest), M4 (paper trading), M5 (execution service at minimum size), M6 (first live case: $50). Spec, tickets and backlog: `.scratch/initial-infrastructure/`.
 - **Pre-pivot code** in the repo (equities/Alpaca bot stubs, a Yahoo Finance data pipeline, a working trade tearsheet app) is archived under `archive/` and described in [archive/README.md](archive/README.md). It is kept for reference and possible reuse.
 
 ## Open questions for the scoping session
