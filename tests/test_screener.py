@@ -14,7 +14,15 @@ from click.testing import CliRunner
 from ttp.cli import main
 from ttp.data.downloader import klines_frame
 from ttp.screener.report import candle_chart
-from ttp.screener.wicks import MIN_EVENTS, rank, wick_stats
+from ttp.screener.wicks import (
+    COLUMNS,
+    EVENT_COLUMNS,
+    MIN_EVENTS,
+    MIN_WICK_TO_BASE,
+    rank,
+    spike_events,
+    wick_stats,
+)
 from ttp.venues.mexc import MexcClient, WeightLimiter
 from ttp.venues.mexc.client import parse_klines
 
@@ -80,6 +88,52 @@ def random_walk(n: int = DAY, seed: int = 2) -> list[list]:
             ]
         )
         price = nxt
+    return rows
+
+
+def candle(i: int, o: float, h: float, lo: float, c: float) -> list:
+    open_ms = START_MS + i * MIN_MS
+    return [open_ms, str(o), str(h), str(lo), str(c), "10", open_ms + MIN_MS, "10"]
+
+
+def trending_steps(n: int = DAY, every: int = 30) -> list[list]:
+    """Price steps up 5% every `every` minutes; each step prints a wick on top."""
+    price, rows = 1.0, []
+    for i in range(n):
+        if i % every == 15:
+            rows.append(candle(i, price, price * 1.08, price, price * 1.05))
+            price *= 1.05  # retrace 0.375: the spike never returns
+        else:
+            rows.append(candle(i, price, price, price, price))
+    return rows
+
+
+def gap_prints(n: int = DAY, every: int = 30) -> list[list]:
+    """Prints bounce between bid 1.00 and ask 1.04 every minute; now and then a
+    single print at 1.06 shows as a wick, but the base is as wide as the wicks."""
+    rows = []
+    for i in range(n):
+        if i % every == 15:
+            rows.append(candle(i, 1.0, 1.06, 1.0, 1.0))
+        elif i % 2 == 0:
+            rows.append(candle(i, 1.0, 1.04, 1.0, 1.04))
+        else:
+            rows.append(candle(i, 1.04, 1.04, 1.0, 1.0))
+    return rows
+
+
+def calm_sweeps(n: int = DAY, every: int = 45, seed: int = 3) -> list[list]:
+    """A calm zone (noise within +-0.3%) swept 6% up every `every` minutes,
+    closing most of the way back (retrace ~0.93)."""
+    rng = random.Random(seed)
+    rows = []
+    for i in range(n):
+        o = 1.0 + rng.uniform(-0.003, 0.003)
+        if i % every == 20:
+            rows.append(candle(i, o, o * 1.06, o, o * 1.004))
+        else:
+            c = 1.0 + rng.uniform(-0.003, 0.003)
+            rows.append(candle(i, o, max(o, c) * 1.001, min(o, c) * 0.999, c))
     return rows
 
 
@@ -160,6 +214,81 @@ def test_ranking_is_deterministic_and_prefers_big_regular_wicks():
     assert table["score"].is_monotonic_decreasing
 
 
+def test_events_record_open_first_close_last_and_retrace():
+    rows = series(DAY, {})
+    rows[100] = candle(100, 1.0, 1.05, 1.0, 1.02)  # a sweep over two minutes...
+    rows[101] = candle(101, 1.02, 1.06, 1.0, 1.01)  # ...closing most of the way back
+    rows[500] = candle(500, 1.0, 1.08, 1.0, 1.05)  # returns less than half
+    events = spike_events(frame(rows), min_wick=0.02)
+    assert list(events.columns) == EVENT_COLUMNS
+    assert len(events) == 2
+    first = events.iloc[0]
+    assert first["start"] == pd.Timestamp(START + timedelta(minutes=100))
+    assert (first["open_first"], first["high"], first["close_last"]) == (
+        1.0,
+        1.06,
+        1.01,
+    )
+    assert first["wick"] == pytest.approx(0.04 / 1.02)  # above the body top 1.02
+    assert first["retrace"] == pytest.approx(0.05 / 0.06)
+    assert events.iloc[1]["retrace"] == pytest.approx(0.375)
+    s = wick_stats(frame(rows), min_wick=0.02)
+    assert (s.wick_count, s.returned_events) == (2, 1)
+    assert s.retrace_median == pytest.approx((0.375 + 0.05 / 0.06) / 2)
+    assert s.wick_median == pytest.approx(0.04 / 1.02)  # over returned sweeps only
+
+
+def test_trending_steps_score_zero():
+    s = wick_stats(frame(trending_steps()), min_wick=0.02)
+    assert s.wick_count == 48
+    assert s.returned_events == 0
+    assert s.retrace_median == pytest.approx(0.375)
+    assert pd.isna(s.wick_median) and pd.isna(s.interval_median_min)
+    assert s.score == 0.0
+
+
+def test_gap_single_prints_score_zero():
+    s = wick_stats(frame(gap_prints()), min_wick=0.02)
+    assert s.returned_events == 48  # every print returns...
+    assert s.regularity == pytest.approx(1.0)  # ...on schedule...
+    assert s.base_range == pytest.approx(0.04 / 1.04, rel=0.05)
+    assert s.wick_median < MIN_WICK_TO_BASE * s.base_range  # ...but is not a sweep
+    assert s.score == 0.0
+
+
+def test_burst_of_returned_sweeps_is_one_episode():
+    s = wick_stats(frame(series(DAY, {m: 0.05 for m in range(100, 110, 2)})), 0.02)
+    assert s.returned_events == 5
+    assert s.interval_median_min == 2
+    assert s.score == 0.0
+
+
+def test_calm_zone_with_returned_sweeps_scores_and_ranks_first():
+    s = wick_stats(frame(calm_sweeps()), min_wick=0.02)
+    assert s.returned_events == s.wick_count == 32
+    assert s.retrace_median == pytest.approx(0.056 / 0.06)
+    assert 0.002 < s.base_range < 0.008  # noise, far below the 5.6% sweeps
+    assert s.interval_median_min == 45 and s.regularity == pytest.approx(1.0)
+    assert s.score == pytest.approx(32 * s.wick_median * 2)
+
+    rows = {
+        "CTRL": random_walk(),
+        "TREND": trending_steps(),
+        "GAP": gap_prints(),
+        "SMALL": periodic(0.03),
+        "CALM": calm_sweeps(),
+    }
+    table = rank(
+        [
+            {"market": m, "volume_24h": 1.0, **vars(wick_stats(frame(r), 0.02))}
+            for m, r in rows.items()
+        ]
+    )
+    assert list(table.columns) == COLUMNS
+    assert table["market"].tolist() == ["CALM", "SMALL", "GAP", "TREND", "CTRL"]
+    assert table["score"].tolist()[2:] == [0.0, 0.0, 0.0]
+
+
 def test_candle_chart_writes_png(tmp_path):
     path = tmp_path / "chart.png"
     candle_chart(frame(periodic(0.05, n=360)), min_wick=0.02, title="X", path=path)
@@ -235,7 +364,11 @@ def test_screen_ranks_universe_and_writes_report(tmp_path):
     stats = pd.read_csv(out / "stats.csv")
     assert stats["market"].tolist() == ["ADXUSDT", "2U2USDT", "ABEYUSDT", "AAVEUSDC"]
     assert stats["rank"].tolist() == [1, 2, 3, 4]
+    assert list(stats.columns) == COLUMNS
     assert stats.loc[0, "wick_count"] == 48
+    assert stats.loc[0, "returned_events"] == 48
+    assert stats.loc[0, "retrace_median"] == pytest.approx(1.0)
+    assert stats.loc[0, "base_range"] == 0.0
     assert stats.loc[0, "wick_median"] == pytest.approx(0.10)
     assert stats.loc[0, "interval_median_min"] == 30
     assert stats.loc[0, "regularity"] == pytest.approx(1.0)
@@ -245,8 +378,14 @@ def test_screen_ranks_universe_and_writes_report(tmp_path):
     report = (out / "report.md").read_text(encoding="utf-8")
     assert "DEBUSDT" not in report  # `st` market excluded by default
     assert "charts/01-ADXUSDT.png" in report
+    assert "| Returned | Events | Typical wick | Retrace | Base range |" in report
+    assert "| 1 | ADXUSDT | 9.60 | 48 | 48 | 10.00% | 100.00% | 0.00% |" in report
     assert "2026-10-27 12:00" in report and "2026-10-28 12:00" in report
     assert "DEBUSDT" not in result.output
+    assert "RETURNED EVENTS    WICK RETRACE    BASE" in result.output
+    assert "ADXUSDT           9.60       48     48  10.00% 100.00%   0.00%" in (
+        result.output
+    )
 
 
 def test_screen_includes_st_markets_on_request(tmp_path):

@@ -2,7 +2,7 @@
 
 **Role:** platform-engineer
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Blocked by:** 04, 09
 
@@ -10,8 +10,20 @@
 
 Spec: [../spec.md](../spec.md)
 
-- [ ] `spike_events` records open of the first spike candle, close of the last, and the event retrace `(H - close_last) / (H - open_first)`; an event is **returned** when retrace >= 0.5
-- [ ] `wick_stats` adds `base_range` (median `(high-low)/close` over non-spike candles), `retrace_median`, `returned_events`; score is 0 unless `returned_events >= 3`, `interval_median_min >= 10`, `regularity > 0` and `wick_median >= 2 x base_range`; otherwise `returned_events x wick_median x (1 + regularity)`
-- [ ] Report columns, CSV and the CLI table include the new fields; v1 columns stay
-- [ ] New fixtures: trending steps and single gap prints score 0; a calm zone with >= 3 returned sweeps ranks first
-- [ ] Re-run on the cached `screener` dataset (no venue requests) and leave the new top-10 report path in `## Comments` for the strategist's review before gate 7
+- [x] `spike_events` records open of the first spike candle, close of the last, and the event retrace `(H - close_last) / (H - open_first)`; an event is **returned** when retrace >= 0.5
+- [x] `wick_stats` adds `base_range` (median `(high-low)/close` over non-spike candles), `retrace_median`, `returned_events`; score is 0 unless `returned_events >= 3`, `interval_median_min >= 10`, `regularity > 0` and `wick_median >= 2 x base_range`; otherwise `returned_events x wick_median x (1 + regularity)`
+- [x] Report columns, CSV and the CLI table include the new fields; v1 columns stay
+- [x] New fixtures: trending steps and single gap prints score 0; a calm zone with >= 3 returned sweeps ranks first
+- [x] Re-run on the cached `screener` dataset (no venue requests) and leave the new top-10 report path in `## Comments` for the strategist's review before gate 7
+
+## Comments
+
+platform-engineer, 2026-10-28:
+
+- **Events** (`src/ttp/screener/wicks.py`): `spike_events` now returns `start, wick, open_first, high, close_last, retrace` per event (`EVENT_COLUMNS`); `retrace = (high - close_last) / (high - open_first)`, 0 if the run did not rise above its open (defensive: a spike candle's high is always above its open). Returned = `retrace >= MIN_RETRACE` (0.5). Retrace can exceed 1 when the last candle closes below the first open; it still counts as returned.
+- **Semantics of the v1 columns (decision):** `wick_count` and `wick_max` stay over all events; `wick_median`, `interval_median_min` and `regularity` are now over **returned** events, matching STRATEGY.md section 2 (`Δ` between returned-event starts, `median(w_e over R)` in the section 3 eligibility) so the screener's gates predict calibration eligibility. For the flat test fixtures (every event returns) nothing changes, so v1 tests pass unchanged. `retrace_median` is over all events (a diagnostic of how spiky-vs-returning the market is).
+- **Gates and score** as specified: `MIN_EVENTS = 3` (returned), `MIN_INTERVAL_MIN = 10`, `regularity > 0`, `MIN_WICK_TO_BASE = 2`; score `returned_events x wick_median x (1 + regularity)`. `base_range` is NaN when every candle is a spike (gate fails, score 0). Ranking tie-break: score, returned events, all events, name. `COLUMNS` order: rank, market, score, returned_events, wick_count, wick_median, retrace_median, base_range, wick_max, interval_median_min, regularity, volume_24h, candles. `report.md` table, chart titles, `stats.csv` and the `ttp screen` table carry the new columns (only the table-printing lines of `cli.py` changed).
+- **Fixtures** (`tests/test_screener.py`): `trending_steps` (5% step up every 30 min with a wick on top, retrace 0.375 -> 0 returned, score 0), `gap_prints` (prints bounce between bid and ask every minute, a 6% single print every 30 min: 48 returned, regular, but `wick_median < 2 x base_range`, score 0), `calm_sweeps` (noise within +-0.3%, 6% sweep every 45 min closing back to +0.4%, retrace 0.93) ranks first ahead of `periodic(0.03)`, the gap, trend and random-walk series; plus a two-minute event field check and a burst (5 returned sweeps 2 min apart) that scores 0.
+- **Re-run on the cached dataset (no venue requests):** window 2026-10-27 08:36 to 2026-10-28 08:36 UTC, the 1,130-market universe and 24h volumes of screen `20261028-083639`, klines read only from `data/datasets/screener`. Report (gitignored, in the platform-engineer worktree): `C:\git\TTP_workbench\.claude\worktrees\agent-a0d15e813c7cc5736\reports\screens\20261028-113941\` (`report.md`, `stats.csv`, `charts/01..10`). **Top 10:** UMXMUSDT (4 returned of 5, wick 6.6%, interval 378 min, regularity 0.80), GMUSDT (9/9, 2.6%, 155 min, 0.47), TAPEFOURUSDT (7/7, 3.1%, 170, 0.45), BORDRUSDT (5/5, 3.1%, 106, 0.59), DRVUSDT (6/6, 3.5%, 99, 0.16), XNTUSDT (5/6, 4.4%, 96, 0.08), XTMUSDT (4/4, 4.9%, 259, 0.22), PYRUSDT (3/3, 4.2%, 548, 0.81), ROBINUSDT (7/8, 2.7%, 150, 0.10), ORAIUSDT (4/4, 3.6%, 115, 0.31). Five of the strategist's six expected candidates surface (UBIKUSDT does not: 1 returned of 3 events). 33 markets score > 0. The v1 top (RTUSDT, IRONUSDT, HOOKEDUSDT, QUICKUSDT, CTXUSDT) now scores 0, all of them through the `regularity > 0` gate.
+- **Observations for the strategist (no rule change made):** (1) the calm-base gate removed nothing in this screen: of 55 markets with >= 3 returned events, 4 fell to the interval gate, 18 to regularity, 0 to `wick_median >= 2 x base_range`. The 1m `(high - low)/close` of thin markets is tiny (median 0.1-0.7%), so 2x base is below the 2% spike floor almost everywhere. (2) Seven scoring markets, including XNTUSDT (rank 6, a gap market in the v1 review), XTMUSDT and UMXMUSDT (rank 1), have `base_range = 0`: most non-spike minutes carry no range at all (no trade or a single print), so the base is empty rather than calm, and the gate `wick >= 2 x 0` is vacuous. If the charts confirm those are gap markets, a v3 gate on base activity (e.g. a minimum share of non-spike minutes with a trade, or `base_range > 0`) would be the next lever. (3) `retrace_median > 1` on several candidates (UMXMUSDT 1.20, XNTUSDT 1.49) means sweeps typically close below where they opened. Thresholds otherwise left as hypothesised; `--min-wick 0.02` unchanged.
+- **Tests:** `uv run pytest` (88 passed, 3 live deselected), `uv run ruff check`, `uv run ruff format --check` all pass.
