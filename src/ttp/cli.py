@@ -1,5 +1,6 @@
 """Command-line entry point: `ttp`."""
 
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -10,8 +11,16 @@ from ttp import __version__
 from ttp.data.cards import current_commit, render_card, write_card
 from ttp.data.downloader import download_klines
 from ttp.data.store import DATASET_NAME, DatasetStore
-from ttp.screener.report import REPORTS_ROOT, write_report
-from ttp.screener.screen import ScreenParams, scan, universe
+from ttp.notify import (
+    DEV_BOT,
+    ENV_FILE,
+    NotifyError,
+    TelegramNotifier,
+    env_names,
+    load_bot_config,
+)
+from ttp.screener.report import REPORTS_ROOT, send_report, write_report
+from ttp.screener.screen import Screen, ScreenParams, scan, universe
 from ttp.screener.universe import thin_markets
 from ttp.venues.mexc import MexcClient, MexcError
 
@@ -193,6 +202,14 @@ def download_klines_cmd(
     is_flag=True,
     help="Also scan markets MEXC flags 'st' (special treatment); excluded by default.",
 )
+@click.option(
+    "--notify",
+    is_flag=True,
+    help=(
+        "Also send the summary and the top candidates' charts to the dev Telegram "
+        f"bot ({' / '.join(env_names(DEV_BOT))} from the environment or .env)."
+    ),
+)
 @click.pass_context
 def screen(
     ctx: click.Context,
@@ -203,6 +220,7 @@ def screen(
     min_wick: float,
     chart_hours: int,
     include_st: bool,
+    notify: bool,
 ) -> None:
     """Rank thin MEXC markets by recurring upper wicks and write a chart report.
 
@@ -268,3 +286,32 @@ def screen(
         click.echo(f"skipped {n} market{'s' if n != 1 else ''} (see report)")
     click.echo(f"report: {out.as_posix()}")
     click.echo(f"screen id: {result.screen_id}")
+    if notify:
+        _notify_screen(ctx, result, out, top)
+
+
+def _notify_screen(ctx: click.Context, result: Screen, out: Path, top: int) -> None:
+    """Send the screen to the dev bot; a missing config warns, a failed send errors."""
+    obj = ctx.obj
+    notifier = obj.get("telegram")
+    if notifier is None:
+        config = load_bot_config(
+            DEV_BOT, obj.get("env", os.environ), obj.get("env_file", ENV_FILE)
+        )
+        if config is None:
+            token, chat = env_names(DEV_BOT)
+            click.echo(
+                f"warning: not sent to Telegram: set {token} and {chat} "
+                "in the environment or .env",
+                err=True,
+            )
+            return
+        notifier = TelegramNotifier(config)
+    try:
+        with notifier:
+            charts = send_report(notifier, result, out, top)
+    except NotifyError as exc:
+        raise click.ClickException(f"Telegram: {exc}") from exc
+    click.echo(
+        f"sent to Telegram: summary and {charts} chart{'s' if charts != 1 else ''}"
+    )
