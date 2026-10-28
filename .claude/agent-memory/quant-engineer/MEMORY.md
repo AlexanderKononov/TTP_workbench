@@ -1,0 +1,2 @@
+- [MEXC klines quirks](mexc-klines-quirks.md) — 500-row cap, start needs end, [start,end), 30-day 1m depth, zero-volume fill
+- [uv venv corruption recovery](uv-venv-corruption.md) — interrupted uv add left NUL files in lock/venv/cache; how to recover
