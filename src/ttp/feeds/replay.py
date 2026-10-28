@@ -20,8 +20,8 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-from ttp.core import Kline, Market, MarketEvent, Timer
-from ttp.data.store import KLINES_1M, DatasetStore, Series
+from ttp.core import Kline, Market, MarketEvent, Side, Timer, Trade
+from ttp.data.store import KLINES_1M, TRADES, DatasetStore, Series
 
 
 @dataclass(frozen=True)
@@ -46,8 +46,20 @@ def _klines(market: Market, rows: pd.DataFrame) -> Iterator[Kline]:
         )
 
 
+def _trades(market: Market, rows: pd.DataFrame) -> Iterator[Trade]:
+    for r in rows.itertuples(index=False):
+        yield Trade(
+            market=market,
+            time=r.time.to_pydatetime(),
+            price=r.price,
+            quantity=r.quantity,
+            side=Side(r.side),
+        )
+
+
 SOURCES: dict[str, ReplaySource] = {
     KLINES_1M.name: ReplaySource(_klines, delay=KLINES_1M.interval),
+    TRADES.name: ReplaySource(_trades, delay=timedelta(0)),
 }
 
 

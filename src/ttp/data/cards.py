@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from ttp.data.datasets import DatasetDefinition, load_definition
 from ttp.data.store import DatasetStore
 
 
@@ -41,6 +42,25 @@ SOURCES = {
             ),
         ),
     ),
+    ("mexc", "trades"): SourceInfo(
+        source="MEXC spot public REST `GET /api/v3/aggTrades`",
+        resolution=(
+            "trade prints (`trades`): time, price, quantity, aggressor side; MEXC "
+            "aggregates prints of one price, side and second into one row"
+        ),
+        quirks=(
+            (
+                "MEXC serves only about the last 24 h of aggregate trades, timestamped "
+                "to the second and without trade ids (checked 2026-10-28), so the "
+                "order of prints within one second is not kept; a dataset's trade "
+                "history starts where its first download reached."
+            ),
+            (
+                "Trades have no grid, so missing hours cannot be told from quiet ones; "
+                "gaps are not listed for them. Recorded trades (M1) come with a gap log."
+            ),
+        ),
+    ),
 }
 
 
@@ -61,6 +81,36 @@ def current_commit(repo: Path | str = ".") -> str:
 
 def _t(ts: pd.Timestamp) -> str:
     return ts.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def definition_lines(d: DatasetDefinition) -> list[str]:
+    """The approved markets, their controls and the approvals behind them."""
+    lines = [
+        "## Definition",
+        "",
+        (
+            f"Version {d.version}: {len(d.candidates)} candidate(s) approved from the "
+            "screener, each paired with one control market drawn at random from "
+            "the same 24h-volume band among markets the screen found pattern-free."
+        ),
+        "",
+        "| Market | Role | Paired with | Screen | Score | Events | 24h volume | Band | Version |",
+        "|---|---|---|---|--:|--:|--:|--:|--:|",
+    ]
+    for m in d.markets:
+        band = "" if m.role == "candidate" else f"x{m.band:g}"
+        lines.append(
+            f"| {m.market} | {m.role} | {m.paired_with} | {m.screen_id} | {m.score:.2f} "
+            f"| {m.wick_count} | {m.volume_24h:,.0f} | {band} | {m.version} |"
+        )
+    lines += ["", "Approvals:", ""]
+    for a in d.approvals:
+        lines.append(
+            f"- v{a.version} on {a.approved_on}: screen `{a.screen_id}`, seed {a.seed}, "
+            f"band x{a.band:g}, controls with at most {a.max_control_events} spike "
+            f"event(s), `ttp` at commit `{a.commit}`"
+        )
+    return lines
 
 
 def render_card(
@@ -121,6 +171,11 @@ def render_card(
         ),
         f"- Known gaps & quirks: {gap_summary}. " + " ".join(quirks),
         "",
+    ]
+    definition = load_definition(store, dataset)
+    if definition is not None:
+        lines += [*definition_lines(definition), ""]
+    lines += [
         "## Series",
         "",
         "| Venue | Market | Data type | First | Last | Rows | Missing steps |",

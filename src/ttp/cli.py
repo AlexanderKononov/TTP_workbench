@@ -1,5 +1,6 @@
 """Command-line entry point: `ttp`."""
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -8,12 +9,25 @@ import pandas as pd
 
 from ttp import __version__
 from ttp.data.cards import current_commit, render_card, write_card
-from ttp.data.downloader import download_klines
+from ttp.data.datasets import (
+    DatasetDefinition,
+    approve,
+    list_definitions,
+    load_definition,
+    load_screen_stats,
+    save_definition,
+)
+from ttp.data.downloader import download_klines, download_trades
 from ttp.data.store import DATASET_NAME, DatasetStore
 from ttp.screener.report import REPORTS_ROOT, write_report
 from ttp.screener.screen import ScreenParams, scan, universe
 from ttp.screener.universe import thin_markets
-from ttp.venues.mexc import MexcClient, MexcError
+from ttp.venues.mexc import (
+    AGG_TRADES_HISTORY_HOURS,
+    MexcClient,
+    MexcError,
+    MexcRateLimited,
+)
 
 
 @click.group()
@@ -268,3 +282,225 @@ def screen(
         click.echo(f"skipped {n} market{'s' if n != 1 else ''} (see report)")
     click.echo(f"report: {out.as_posix()}")
     click.echo(f"screen id: {result.screen_id}")
+
+
+@main.group()
+def dataset() -> None:
+    """Approved datasets: candidates from a screen plus matched control markets."""
+
+
+DOWNLOAD_WORKERS = 4
+
+
+def _download_history(
+    client: MexcClient, store: DatasetStore, name: str, markets: list[str], now, days
+) -> dict[str, str]:
+    """Download klines and trades for every market, a few at a time; returns failures."""
+    kline_start = now - timedelta(days=days)
+    trade_start = now - timedelta(hours=AGG_TRADES_HISTORY_HOURS + 2)
+
+    def one(market: str) -> str:
+        k = download_klines(client, store, name, market, kline_start, now)
+        t = download_trades(client, store, name, market, trade_start, now)
+        return (
+            f"{market}: klines {k.fetched} fetched, {k.added} new, "
+            f"{k.still_missing} min missing; trades {t.fetched} fetched, {t.added} new"
+        )
+
+    failed: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
+        futures = {pool.submit(one, m): m for m in markets}
+        try:
+            for future in as_completed(futures):
+                market = futures[future]
+                try:
+                    click.echo(future.result())
+                except MexcRateLimited:
+                    raise
+                except MexcError as exc:
+                    failed[market] = str(exc)
+                    click.echo(f"{market}: FAILED: {exc}")
+        except MexcRateLimited:
+            pool.shutdown(cancel_futures=True)
+            raise
+    return failed
+
+
+@dataset.command("approve")
+@click.argument("screen_id")
+@click.argument("markets", nargs=-1, required=True)
+@click.option("--name", required=True, callback=_dataset, help="Dataset name.")
+@click.option(
+    "--seed",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Seed of the control draw; same screen, markets and seed pick the same controls.",
+)
+@click.option(
+    "--band",
+    type=click.FloatRange(min=1, min_open=True),
+    default=2.0,
+    show_default=True,
+    help="Volume band ratio: a control's 24h volume lies within candidate / band "
+    "to candidate x band.",
+)
+@click.option(
+    "--max-control-events",
+    type=click.IntRange(min=0, max=2),
+    default=0,
+    show_default=True,
+    help="Most spike events a control may show in the screen.",
+)
+@click.option(
+    "--days",
+    type=click.IntRange(min=1),
+    default=30,
+    show_default=True,
+    help="Days of 1m klines to download (MEXC keeps about 30).",
+)
+@click.option(
+    "--no-download",
+    is_flag=True,
+    help="Write the definition and card only; download history later by re-running.",
+)
+@click.pass_context
+def dataset_approve(
+    ctx: click.Context,
+    screen_id: str,
+    markets: tuple[str, ...],
+    name: str,
+    seed: int,
+    band: float,
+    max_control_events: int,
+    days: int,
+    no_download: bool,
+) -> None:
+    """Approve MARKETS from screen SCREEN_ID into dataset NAME (gate 7).
+
+    Each approved market gets one control market, drawn at random (seeded) from
+    the same 24h-volume band among markets the screen found pattern-free. Then
+    the kline and trade history MEXC still serves is downloaded for every market
+    of the dataset, and the dataset card is written. Re-running with more markets
+    adds a version; re-running with the same markets just refreshes the history.
+    Run from the repo root.
+    """
+    obj = ctx.obj
+    store = DatasetStore(obj.get("data_root", DATA_ROOT))
+    reports_root = Path(obj.get("reports_root", REPORTS_ROOT))
+    now = obj.get("now", lambda: datetime.now(UTC))()
+    commit = obj.get("commit") or current_commit()
+    try:
+        stats = load_screen_stats(reports_root, screen_id)
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc)) from exc
+    definition = load_definition(store, name) or DatasetDefinition(name)
+    try:
+        added = approve(
+            definition,
+            stats,
+            screen_id,
+            [_market(m) for m in markets],
+            now,
+            seed,
+            band,
+            max_control_events,
+            commit,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if added:
+        save_definition(store, definition)
+        click.echo(f"dataset '{name}' version {definition.version}: added")
+        for m in added:
+            if m.role == "candidate":
+                click.echo(f"  {m.market:<14} candidate  control {m.paired_with}")
+            else:
+                click.echo(
+                    f"  {m.market:<14} control    for {m.paired_with}, "
+                    f"{m.wick_count} events, 24h vol {m.volume_24h:,.0f}, band x{m.band:g}"
+                )
+    else:
+        click.echo(
+            f"dataset '{name}' version {definition.version}: all markets already in it"
+        )
+    failed: dict[str, str] = {}
+    if not no_download:
+        client = obj.get("mexc") or MexcClient()
+        try:
+            with client:
+                failed = _download_history(
+                    client, store, name, definition.symbols, now, days
+                )
+        except MexcError as exc:
+            raise click.ClickException(str(exc)) from exc
+    card = write_card(
+        Path(obj.get("cards_dir", CARDS_DIR)),
+        name,
+        render_card(
+            store,
+            name,
+            location=store.dataset_dir(name).as_posix(),
+            collected_by=commit,
+            collected_on=now.date(),
+        ),
+    )
+    click.echo(f"dataset card: {card.as_posix()}")
+    if failed:
+        raise click.ClickException(
+            f"history download failed for {', '.join(sorted(failed))}; re-run to retry"
+        )
+
+
+@dataset.command("list")
+@click.pass_context
+def dataset_list(ctx: click.Context) -> None:
+    """List approved datasets."""
+    store = DatasetStore(ctx.obj.get("data_root", DATA_ROOT))
+    definitions = list_definitions(store)
+    if not definitions:
+        click.echo("no approved datasets (see `ttp dataset approve`)")
+        return
+    click.echo(
+        f"{'DATASET':<24} {'VERSION':>7} {'CANDIDATES':>10} {'CONTROLS':>8}  LAST APPROVED"
+    )
+    for d in definitions:
+        click.echo(
+            f"{d.name:<24} {d.version:>7} {len(d.candidates):>10} {len(d.controls):>8}  "
+            f"{d.approvals[-1].approved_on}"
+        )
+
+
+@dataset.command("show")
+@click.argument("name", callback=_dataset)
+@click.pass_context
+def dataset_show(ctx: click.Context, name: str) -> None:
+    """Show an approved dataset: its markets, controls and stored series."""
+    store = DatasetStore(ctx.obj.get("data_root", DATA_ROOT))
+    d = load_definition(store, name)
+    if d is None:
+        raise click.ClickException(f"no approved dataset '{name}'")
+    click.echo(f"dataset '{d.name}' version {d.version} on {d.venue}")
+    click.echo(
+        f"{'MARKET':<14} {'ROLE':<9} {'PAIRED WITH':<14} {'SCREEN':<16} {'SCORE':>6} "
+        f"{'EVENTS':>6} {'24H VOLUME':>11} {'VER':>3}"
+    )
+    for m in d.markets:
+        click.echo(
+            f"{m.market:<14} {m.role:<9} {m.paired_with:<14} {m.screen_id:<16} "
+            f"{m.score:>6.2f} {m.wick_count:>6} {m.volume_24h:>11,.0f} {m.version:>3}"
+        )
+    click.echo("approvals:")
+    for a in d.approvals:
+        click.echo(
+            f"  v{a.version} {a.approved_on} screen {a.screen_id} seed {a.seed} "
+            f"band x{a.band:g} commit {a.commit}"
+        )
+    series = store.series(name)
+    click.echo("stored series:" if series else "stored series: none")
+    fmt = "%Y-%m-%d %H:%M"
+    for s in series:
+        click.echo(
+            f"  {s.market:<14} {s.data_type.name:<10} {s.first:{fmt}} to "
+            f"{s.last:{fmt}} UTC, {s.rows:,} rows"
+        )

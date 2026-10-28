@@ -47,7 +47,22 @@ KLINES_1M = DataType(
     interval=timedelta(minutes=1),
 )
 
-DATA_TYPES = {t.name: t for t in (KLINES_1M,)}
+# Public trade prints. `side` is the aggressor (taker) side, "buy" or "sell".
+# MEXC gives no trade ids, so the whole row is the key: two prints identical in
+# time, price, size and side collapse into one.
+TRADES = DataType(
+    name="trades",
+    time_column="time",
+    key=("time", "price", "quantity", "side"),
+    columns={
+        "time": "TIMESTAMP",
+        "price": "DOUBLE",
+        "quantity": "DOUBLE",
+        "side": "VARCHAR",
+    },
+)
+
+DATA_TYPES = {t.name: t for t in (KLINES_1M, TRADES)}
 PART_FILE = "data.parquet"
 
 

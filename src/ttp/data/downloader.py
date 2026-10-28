@@ -6,8 +6,8 @@ from typing import Protocol
 
 import pandas as pd
 
-from ttp.data.store import KLINES_1M, DatasetStore
-from ttp.venues.mexc import Kline
+from ttp.data.store import KLINES_1M, TRADES, DatasetStore
+from ttp.venues.mexc import AggTrade, Kline
 
 VENUE = "mexc"
 
@@ -16,6 +16,10 @@ class KlineSource(Protocol):
     def klines(
         self, symbol: str, start_ms: int, end_ms: int, interval: str = "1m"
     ) -> list[Kline]: ...
+
+
+class TradeSource(Protocol):
+    def agg_trades(self, symbol: str, start_ms: int, end_ms: int) -> list[AggTrade]: ...
 
 
 @dataclass(frozen=True)
@@ -97,3 +101,53 @@ def download_klines(
         added=added,
         still_missing=sum((hi - lo) // step for lo, hi in still),
     )
+
+
+@dataclass(frozen=True)
+class TradesDownloadResult:
+    start: pd.Timestamp  # range asked from the venue: [start, end)
+    end: pd.Timestamp
+    fetched: int  # prints the venue returned
+    added: int  # prints new to the dataset
+
+
+def trades_frame(trades: list[AggTrade]) -> pd.DataFrame:
+    df = pd.DataFrame(
+        [
+            {
+                "time_ms": t.time_ms,
+                "price": t.price,
+                "quantity": t.quantity,
+                "side": "sell" if t.buyer_is_maker else "buy",
+            }
+            for t in trades
+        ],
+        columns=["time_ms", "price", "quantity", "side"],
+    )
+    df.insert(0, "time", pd.to_datetime(df.pop("time_ms"), unit="ms", utc=True))
+    return df
+
+
+def download_trades(
+    source: TradeSource,
+    store: DatasetStore,
+    dataset: str,
+    market: str,
+    start: datetime,
+    end: datetime,
+) -> TradesDownloadResult:
+    """Fetch trade prints for [start, end) and store them.
+
+    Trades have no grid, so a quiet hour and a missing hour look the same; the
+    dataset cannot tell what it lacks. The venue is therefore asked from the
+    last stored print (or `start`) onwards, and re-running extends the series.
+    Prints at the last stored second are fetched again and deduplicated.
+    """
+    start = pd.Timestamp(start).tz_convert("UTC").floor("s")
+    end = pd.Timestamp(end).tz_convert("UTC").floor("s")
+    stored = store.read(dataset, VENUE, market, TRADES, start, end)
+    if not stored.empty:
+        start = max(start, stored[TRADES.time_column].iloc[-1])
+    trades = source.agg_trades(market, _ms(start), _ms(end)) if start < end else []
+    added = store.write(dataset, VENUE, market, TRADES, trades_frame(trades))
+    return TradesDownloadResult(start, end, len(trades), added)
