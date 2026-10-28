@@ -39,6 +39,7 @@ wide spread print as wicks, and choppy noise. None of those return to a zone.
 | anchor `A_t` | median of `close` over the trailing `zone_window` closed candles **excluding spike candles**; if fewer than `zone_min_candles` remain, median over all `zone_window` candles |
 | reach `g_e` | `H_e / A_(first candle of e, previous close) - 1` (anchor as of the candle before the event) |
 | `base_range` | median over non-spike candles of `(high - low) / close` |
+| `active_share` | share of non-spike candles with `high > low` (a minute with at least two prices; a no-trade or single-print minute is inactive) |
 | `zone_dev_95` | 95th percentile over non-spike candles of `abs(close_t / A_t - 1)` |
 | interval `Δ_i` | minutes between consecutive returned-event starts |
 | `regularity` | `max(0, 1 - std(Δ)/mean(Δ))` (population std; same as the screener) |
@@ -54,13 +55,15 @@ Input: the market's 1m klines for the last `cal_days = 7` days [H; MEXC keeps 30
 reflects current bot behaviour, M3 checks stability against 14], plus the venue's
 symbol filters (min quantity, min notional, price tick). Output: a `Params` record.
 
-1. Compute events, returned events `R`, `A_t`, `g_e`, `base_range`, `zone_dev_95`,
-   `Δ`, `regularity`, `V_e` as in §2.
+1. Compute events, returned events `R`, `A_t`, `g_e`, `base_range`, `active_share`,
+   `zone_dev_95`, `Δ`, `regularity`, `V_e` as in §2.
 2. **Eligibility** (all must hold, else the market is not calibrated and not tradable):
    - `len(R) >= 3 * cal_days` (on average ≥ 3 returned sweeps per day);
    - `median(Δ) >= 10` minutes (bursts are one episode, not a bot) [H];
    - `regularity > 0` (interval cv < 1) [H];
    - `median(w_e over R) >= 2 * base_range` (sweeps stand out from zone noise) [H];
+   - `active_share >= 0.5` (the zone trades; a resting order in an empty book is not
+     a zone) [H; added after the gate-7 review, §8];
    - `r_1 >= min_profit` (see step 3).
 3. **Sell levels** from the reach distribution of returned events:
    `r_1 = Q25(g_R)`, `r_2 = Q50(g_R)`, `r_3 = Q75(g_R)` with inventory shares
@@ -198,6 +201,16 @@ klines, `min_wick` 2%); inspected `report.md`, `stats.csv` and the charts of ran
   definition is approved on its logic, and the candidate list waits for the screener
   v2 re-run on the cached klines (no venue requests needed).
 
+**Screener v2 re-run** (`reports/screens/20261028-113941/`, same klines, rules of §10;
+review in `.scratch/initial-infrastructure/gate-7-recommendation.md`): 33 of 1,130
+markets score > 0; the v1 top 5 all fall to `regularity > 0`. Of the v2 top 10, two
+charts show a calm zone with a single-minute sweep that closes back into it (DRVUSDT,
+ORAIUSDT), one a calm zone with rare violent two-sided bursts (PYRUSDT), three are gap
+markets with `base_range = 0` (UMXMUSDT, XNTUSDT, XTMUSDT), two trends with wicks on
+step tops (GMUSDT, ROBINUSDT), two chop (TAPEFOURUSDT, BORDRUSDT). Recommended first
+dataset: DRVUSDT, ORAIUSDT, PYRUSDT plus auto-picked controls. Still no confirmed
+example; each candidate shows at most one clean sweep inside its 6 h chart.
+
 ## 9. Open hypotheses and risks
 
 1. **Fees**: 0% maker / 0.05% taker is from a secondary source only
@@ -238,3 +251,26 @@ updated; fixtures: a "trending steps" series and a "gap single prints" series mu
 score 0, a "calm zone + returned sweeps" series must rank first. Re-run on the cached
 `data/datasets/screener` klines and chart the new top 10 for the strategist to review
 before gate 7. Keep `--min-wick 0.02` until v2 output is seen.
+
+**v2 is implemented (ticket 12).** Review of its output (§8, gate-7 recommendation):
+the calm-base gate removed nothing because 1m ranges of thin markets (0.1–0.7%) make
+`2 × base_range` smaller than the 2% wick floor; it stays at 2× as a principled floor.
+Seven scoring markets had `base_range = 0` and the three charted are gap markets.
+
+**v3 (one rule, follow-up ticket for platform-engineer):**
+
+- `wick_stats` gains `active_share` (§2: share of non-spike candles with
+  `high > low`), reported as a column after `base_range`.
+- Score 0 unless `active_share >= 0.5` [H]. On the v2 run this equals `base_range > 0`
+  and removes exactly the 7 base-0 markets; the floor is the place to tighten later.
+- Fixture: a "single print per minute, no range" series (gap market) must score 0; the
+  `calm_sweeps` fixture must keep ranking first.
+- `retrace_median` stays a diagnostic; no gate on it. A last close below the first open
+  helps the rebuy fill, and the values ≥ 1.3 seen all belong to base-0 markets.
+
+Lower-priority lever, not cut yet [H]: trends with wicks on step tops (ROBINUSDT,
+GMUSDT) pass v2 because `ρ_e` compares `C_e` with the event's own `O_e`. Measuring the
+return against the pre-event anchor, `ρ'_e = (H_e - C_e) / (H_e - A_e)`, leaves a sweep
+on a flat zone unchanged and marks a wick on a step as not returned (ROBIN: about
+2.7 / (3 + 2.7) ≈ 0.47). It needs the rolling anchor of §2 in the screener; decide
+after the 7-day history of the first dataset shows whether the trend leak matters.
