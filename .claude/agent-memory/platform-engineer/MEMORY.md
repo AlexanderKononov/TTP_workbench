@@ -1,2 +1,2 @@
-- [Venue API quirks](venue-api-quirks.md) — MEXC/Hyperliquid gotchas: fees in exchangeInfo, no MEXC amend, ccxt book bug, HL ctx indexing, HL action budget
-- [Tooling gotchas](tooling-gotchas.md) — slow git --ignored locks index; uv sync prunes root .venv; CliRunner prog_name
+- [Venue API quirks](venue-api-quirks.md) — MEXC/Hyperliquid gotchas: fees in exchangeInfo, st flag, ~0.4 s latency (scan in parallel), no MEXC amend, ccxt book bug, HL limits
+- [Tooling gotchas](tooling-gotchas.md) — slow git --ignored locks index; uv sync prunes root .venv; CliRunner prog_name; DuckDB default connection not thread-safe; worktree sandbox refusals

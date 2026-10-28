@@ -207,12 +207,15 @@ class DatasetStore:
     ) -> pd.DataFrame:
         cols = ", ".join(f'"{c}"' for c in data_type.columns)
         if not files:
-            empty = duckdb.sql(
-                "SELECT "
-                + ", ".join(f'NULL::{t} AS "{c}"' for c, t in data_type.columns.items())
-                + " LIMIT 0"
-            )
-            return empty.df()
+            # Own connection: the module-level default one is not thread-safe.
+            with duckdb.connect() as con:
+                return con.sql(
+                    "SELECT "
+                    + ", ".join(
+                        f'NULL::{t} AS "{c}"' for c, t in data_type.columns.items()
+                    )
+                    + " LIMIT 0"
+                ).df()
         t = f'"{data_type.time_column}"'
         where, params = [], {"files": [f.as_posix() for f in files]}
         if start is not None:
