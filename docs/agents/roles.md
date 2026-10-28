@@ -8,12 +8,12 @@ The **Governor** is the main interactive session: it plans with the Owner, dispa
 
 | Role | Family | Owns | Model |
 |---|---|---|---|
-| `strategist` | trading | Strategy design, spike-pattern definitions, risk, sizing, venue/coin research, on-demand review of results | Opus |
-| `platform-engineer` | dev | Venue connectors, screener, trading engine, execution service, live monitoring + Telegram reports | Opus |
-| `quant-engineer` | dev | Market data pipeline + dataset cards, backtest engine, strategies as code | Opus |
+| `strategist` | trading | Strategy design, spike-pattern definitions, risk, sizing, venue/coin research, on-demand review of results | Fable |
+| `platform-engineer` | dev | Venue connectors, screener, trading engine, execution service, live monitoring + Telegram reports | Fable |
+| `quant-engineer` | dev | Market data pipeline + dataset cards, backtest engine, strategies as code | Fable |
 | `verifier` | dev | Tests and validation of others' work; writes tests, never production code | Opus |
 
-Split a role when its memory or scope outgrows it. The first planned split is a Sonnet developer role for simple tasks, to cut cost.
+Planning and development roles run on Fable (the strongest model); `verifier` stays on Opus. Split a role when its memory or scope outgrows it. The first planned split is a Sonnet developer role for simple tasks, to cut cost.
 
 No role holds venue credentials or places orders; the execution service does ([ADR-0004](../adr/0004-deterministic-trading-system.md)). Runtime monitoring is trading-system code, not an agent.
 

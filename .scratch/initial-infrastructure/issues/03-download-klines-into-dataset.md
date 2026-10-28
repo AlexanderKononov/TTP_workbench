@@ -29,3 +29,5 @@ quant-engineer, 2026-10-28:
 - **Dependencies added:** `duckdb>=2.0,<3`, `pandas>=3.1,<4`. Writing goes through DuckDB `COPY`, so no pyarrow is needed.
 - **QUESTION FOR OWNER:** should generated dataset cards be committed to the repo? (They are under `docs/`, which is tracked; the data itself is gitignored.) The conservative choice for now: the downloader writes the card and leaves committing it to the Owner. No card is committed in this branch.
 - Live check (2026-10-28): `--days 32` on ADXUSDT fetched 43,200 rows (30 days) in about 37 s. A re-run added 0 rows, and the card showed 0 internal gaps.
+
+**Governor decision (dataset cards):** cards for Owner-approved datasets (ticket 06) are committed, since the knowledge base is the provenance record backtests cite. Cards for the default `adhoc` dataset are gitignored. Branch-parallel work from now on uses isolated worktrees, so the integration branch is `governor/initial-infrastructure-spec` in the main checkout only.

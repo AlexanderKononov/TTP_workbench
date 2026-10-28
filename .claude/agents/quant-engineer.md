@@ -2,7 +2,7 @@
 name: quant-engineer
 description: Dev role. Use for the market data pipeline and dataset cards, the backtest engine, and turning approved strategies into strategy code.
 tools: Read, Grep, Glob, Write, Edit, Bash, WebSearch, WebFetch
-model: opus
+model: fable
 memory: project
 ---
 

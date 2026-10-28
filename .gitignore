@@ -219,3 +219,6 @@ archive/data/metadata.db
 # Claude Code local-only files
 .claude/settings.local.json
 .claude/agent-memory-local/
+
+# Ad-hoc dataset cards are scratch; cards for approved datasets are committed
+docs/knowledge-base/datasets/adhoc*.md
