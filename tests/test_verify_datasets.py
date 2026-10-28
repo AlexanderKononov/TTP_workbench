@@ -58,6 +58,14 @@ def test_draw_is_reproducible_under_shuffled_stats_rows():
         assert picks(shuffled, ["C1USDT", "C2USDT", "C4USDT"]) == want
 
 
+def test_draw_does_not_depend_on_candidate_order():
+    # Ticket 15: C1 C2 C3 and C3 C2 C1 pair identically for every seed.
+    table = stats()
+    cands = ["C1USDT", "C2USDT", "C3USDT"]
+    for seed in range(50):
+        assert picks(table, cands, seed) == picks(table, cands[::-1], seed)
+
+
 def test_earlier_controls_are_unchanged_by_later_approvals():
     table = stats()
     alone = DatasetDefinition("d")
