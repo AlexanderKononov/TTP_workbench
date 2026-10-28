@@ -1,1 +1,3 @@
 - [Venue research how-to](venue-research-howto.md) — working doc URLs for MEXC/Hyperliquid, WebFetch limits, delegate market counts
+- [Worktree inputs may be elsewhere](worktree-inputs-may-be-elsewhere.md) — dispatched worktree may sit at main; read inputs from the sibling worktree, write full files
+- [Screener v1 ranks volatility](screener-v1-ranks-volatility.md) — 2026-10-28 screen top-10 showed no sweep pattern; v2 gates proposed in STRATEGY.md §10
