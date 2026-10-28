@@ -4,7 +4,7 @@
 
 **Status:** ready-for-agent
 
-**Blocked by:** 07, 08, 10
+**Blocked by:** 07, 08, 10, 12, 14
 
 **What to build:** Independent validation of everything built in M0-M2 against the spec and the tickets' acceptance criteria. Completes M2 (together with 09 at gate 2).
 
