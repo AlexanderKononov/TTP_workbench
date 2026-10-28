@@ -1,0 +1,1 @@
+- [Venue research how-to](venue-research-howto.md) — working doc URLs for MEXC/Hyperliquid, WebFetch limits, delegate market counts

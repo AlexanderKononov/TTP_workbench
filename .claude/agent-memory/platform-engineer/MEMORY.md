@@ -1,0 +1,1 @@
+- [Venue API quirks](venue-api-quirks.md) — MEXC/Hyperliquid gotchas: fees in exchangeInfo, no MEXC amend, ccxt book bug, HL ctx indexing, HL action budget

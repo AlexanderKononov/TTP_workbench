@@ -40,8 +40,18 @@ _Avoid_: Ticker, symbol (when meaning pair + venue)
 A market whose depth, volume or spread falls within the thresholds that define the system's target universe.
 _Avoid_: Illiquid, small cap
 
-**Spike pattern** *(provisional)*:
-A robot-like price spike in a low-liquidity market that repeats regularly for some period of time.
+**Volume bot**:
+A third party's robot that periodically trades through a thin market's order book (e.g. buys everything up to some volume) to keep the market's trading volume up.
+_Avoid_: Market maker (when meaning this)
+
+**Spike pattern**:
+A recurring, short price excursion caused by a volume bot sweeping the book, after which price returns to its normal zone. Its size, direction and regularity differ per market.
+
+**Up-spike** / **Down-spike**:
+A spike pattern that moves price up (bot buying) or down (bot selling) from the normal zone.
+
+**Normal zone** *(provisional)*:
+The price range a market trades in between spikes.
 
 ### Trading system
 
@@ -53,13 +63,35 @@ _Avoid_: Bot, AI trader
 The part of the trading system that holds venue credentials and places orders, only when strategy signals, a confirmation and its limits all allow it.
 _Avoid_: Executor agent, broker
 
-**Screen** *(provisional)*:
-A run that scans venues and markets and produces candidates.
-_Avoid_: Scan, search
+**Engine**:
+The event loop that runs one strategy against one feed and one broker; the same in every stage.
+_Avoid_: Executor, runner
 
-**Candidate** *(provisional)*:
-A market the screen flags as worth evaluating with a strategy.
+**Feed**:
+A source of market events for the engine: a replay feed from a dataset, or a live feed from a venue.
+_Avoid_: Data provider, reader
+
+**Broker**:
+What receives a strategy's order intents and reports fills: the simulated broker (backtest), the paper broker (paper), or the execution service (live).
+_Avoid_: Executor
+
+**Venue connector**:
+The only code that talks to a venue's API, for market data and orders.
+_Avoid_: Exchange client, adapter
+
+**Order intent**:
+A strategy's request to place or cancel an order; it becomes a real order only if the broker accepts it.
+
+**Screener**:
+Ranks markets for a strategy's pattern and proposes candidates with evidence (price charts of recent hours and pattern statistics).
+_Avoid_: Scanner
+
+**Candidate**:
+A market the screener proposes for a strategy's dataset.
 _Avoid_: Potential coin, signal
+
+**Recorder**:
+Records a live feed into a dataset.
 
 **Strategy**:
 A rule set, written as code, defining when to enter, size and exit a position in a market.
@@ -82,6 +114,16 @@ _Avoid_: Rules, settings
 
 **Expiry**:
 The end of a confirmed case's time window, after which it stops trading.
+
+### Data
+
+**Dataset**:
+A named, versioned collection of time series recorded or downloaded for one strategy: its approved candidate markets plus control markets.
+_Avoid_: Data dump, history
+
+**Control market**:
+A market in a dataset chosen at random from a similar liquidity band, without the pattern, used as a negative example.
+_Avoid_: Random coin, benchmark
 
 ### Lifecycle
 

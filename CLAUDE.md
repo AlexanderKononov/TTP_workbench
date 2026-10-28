@@ -28,7 +28,7 @@ These hold for every agent, every role, every task:
 | [docs/adr/](docs/adr/) | Architecture decisions. Read the ones touching your area; flag conflicts explicitly |
 | [docs/agents/roles.md](docs/agents/roles.md) | Roles, gates, branch/PR workflow. **Read before dispatching or acting as a role** |
 | [docs/agents/](docs/agents/) | Issue tracker and domain-doc rules |
-| `strategies/<name>/STRATEGY.md` | Approved strategy definition, next to its code |
+| `src/ttp/strategies/<name>/STRATEGY.md` | Approved strategy definition, next to its code |
 | [docs/knowledge-base/](docs/knowledge-base/) | Venues, markets, strategies research, dataset cards |
 | [.scratch/](.scratch/) | Agent working area: specs, tickets, maps, per feature |
 | [docs/legacy.md](docs/legacy.md) | Pre-pivot code (`tearsheet/`, `data/`, root bot stubs). Read before touching those dirs |

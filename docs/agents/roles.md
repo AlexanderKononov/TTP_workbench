@@ -23,7 +23,7 @@ Boundaries are enforced by each role's `tools` list plus path rules in its promp
 
 - Each ticket carries a `Role:` line, set in the ticket breakdown and approved at gate 3; the Governor dispatches by it.
 - Each ticket is worked on a branch `<role>/<ticket-slug>`; the Governor opens a GitHub pull request. `main` is branch-protected: nobody, agents included, pushes to it directly.
-- An approved strategy lives at `strategies/<name>/STRATEGY.md`, next to its code (pattern, entry/exit, sizing, risk, parameters, current stage); `.scratch/` holds only drafts.
+- An approved strategy lives at `src/ttp/strategies/<name>/STRATEGY.md`, next to its code (pattern, entry/exit, sizing, risk, parameters, current stage); `.scratch/` holds only drafts.
 
 ## Knowledge
 
@@ -41,6 +41,9 @@ The Governor stops for the Owner at each of these. They are the minimum; early i
 4. **Merge to `main`**: the Owner reviews the diff.
 5. **Stage promotion**: backtest → paper → live ([ADR-0005](../adr/0005-three-stage-promotion.md)).
 6. **Autonomy level change**.
+7. **Dataset approval**: the screener's candidates (with price charts of recent hours and pattern statistics) are approved before history is downloaded or recording starts.
+
+Dev roles build within [docs/architecture.md](../architecture.md).
 
 In the trading system, the gate is the **confirmation** of a case ([ADR-0002](../adr/0002-human-confirmed-execution.md)).
 
