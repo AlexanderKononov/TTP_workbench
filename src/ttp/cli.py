@@ -211,7 +211,7 @@ def download_klines_cmd(
 @click.option(
     "--chart-hours",
     type=click.IntRange(min=1),
-    default=6,
+    default=24,
     show_default=True,
     help="Hours shown on each candidate's chart.",
 )
@@ -284,21 +284,21 @@ def screen(
     )
     click.echo(
         f"{'#':>3} {'MARKET':<14} {'SCORE':>7} {'RETURNED':>8} {'EVENTS':>6} "
-        f"{'WICK':>7} {'RETRACE':>7} {'BASE':>7} {'INTERVAL':>8} {'REGULAR':>7} "
-        f"{'24H VOLUME':>12}"
+        f"{'WICK':>7} {'RETRACE':>7} {'BASE':>7} {'ACTIVE':>7} {'INTERVAL':>8} "
+        f"{'REGULAR':>7} {'24H VOLUME':>12}"
     )
     for r in result.table.head(top).itertuples(index=False):
         interval = (
             "-" if pd.isna(r.interval_median_min) else f"{r.interval_median_min:.0f}"
         )
-        wick, retrace, base = (
+        wick, retrace, base, active = (
             "-" if pd.isna(x) else f"{x:.2%}"
-            for x in (r.wick_median, r.retrace_median, r.base_range)
+            for x in (r.wick_median, r.retrace_median, r.base_range, r.active_share)
         )
         click.echo(
             f"{r.rank:>3} {r.market:<14} {r.score:>7.2f} {r.returned_events:>8} "
-            f"{r.wick_count:>6} {wick:>7} {retrace:>7} {base:>7} {interval:>8} "
-            f"{r.regularity:>7.2f} {r.volume_24h:>12,.0f}"
+            f"{r.wick_count:>6} {wick:>7} {retrace:>7} {base:>7} {active:>7} "
+            f"{interval:>8} {r.regularity:>7.2f} {r.volume_24h:>12,.0f}"
         )
     click.echo(
         f"scanned {len(result.table)} of {result.universe} markets, "

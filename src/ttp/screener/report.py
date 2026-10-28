@@ -162,13 +162,14 @@ def write_report(
         ),
         (
             "- Returned event: retrace (high - last close) / (high - first open) "
-            ">= 50%. Base range: median (high - low) / close of non-spike candles"
+            ">= 50%. Base range: median (high - low) / close of non-spike candles. "
+            "Active: share of non-spike candles with high > low"
         ),
         (
             "- Score: returned events x typical wick x (1 + regularity), or 0 unless "
-            ">= 3 returned events, median interval >= 10 min, regularity > 0 and "
-            "typical wick >= 2 x base range. Regularity is 1 - cv(intervals between "
-            "returned events), 1 = perfectly periodic"
+            ">= 3 returned events, median interval >= 10 min, regularity > 0, "
+            "typical wick >= 2 x base range and active >= 50%. Regularity is "
+            "1 - cv(intervals between returned events), 1 = perfectly periodic"
         ),
         (
             f"- Scanned {len(screen.table)} markets, skipped {len(screen.skipped)}; "
@@ -177,9 +178,10 @@ def write_report(
         "",
         (
             "| # | Market | Score | Returned | Events | Typical wick | Retrace "
-            "| Base range | Max wick | Interval (min) | Regularity | 24h volume | Chart |"
+            "| Base range | Active | Max wick | Interval (min) | Regularity "
+            "| 24h volume | Chart |"
         ),
-        "|--:|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|",
+        "|--:|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|",
     ]
     for r in screen.table.head(top).itertuples(index=False):
         chart = chart_path(r.rank, r.market)
@@ -191,15 +193,15 @@ def write_report(
             p.min_wick,
             f"{r.market}  score {r.score:.2f}  returned {r.returned_events}/"
             f"{r.wick_count}  typical wick {_pct(r.wick_median)}  retrace "
-            f"{_pct(r.retrace_median)}  base {_pct(r.base_range)}  interval "
-            f"{_num(r.interval_median_min)} min  regularity {r.regularity:.2f}  "
-            f"24h vol ${r.volume_24h:,.0f}",
+            f"{_pct(r.retrace_median)}  base {_pct(r.base_range)}  active "
+            f"{_pct(r.active_share)}  interval {_num(r.interval_median_min)} min  "
+            f"regularity {r.regularity:.2f}  24h vol ${r.volume_24h:,.0f}",
             out / chart,
         )
         lines.append(
             f"| {r.rank} | {r.market} | {r.score:.2f} | {r.returned_events} "
             f"| {r.wick_count} | {_pct(r.wick_median)} | {_pct(r.retrace_median)} "
-            f"| {_pct(r.base_range)} | {_pct(r.wick_max)} "
+            f"| {_pct(r.base_range)} | {_pct(r.active_share)} | {_pct(r.wick_max)} "
             f"| {_num(r.interval_median_min)} | {r.regularity:.2f} "
             f"| {r.volume_24h:,.0f} | [{chart.name}]({chart.as_posix()}) |"
         )

@@ -5,7 +5,8 @@ as a fraction of the body top. Adjacent spike minutes are one event. An event ha
 **returned** when price retraced at least `MIN_RETRACE` of its rise by the close of
 its last candle. A market is scored by how many returned sweeps it shows, how big
 they typically are and how regularly they recur, and only when they stand out from
-a calm base; otherwise it scores 0 (rule: `up_spike_harvest/STRATEGY.md` section 10).
+a calm base that actually trades; otherwise it scores 0 (rule:
+`up_spike_harvest/STRATEGY.md` sections 3 and 10).
 """
 
 import math
@@ -17,6 +18,7 @@ MIN_EVENTS = 3  # returned events; at least two intervals, so regularity means s
 MIN_RETRACE = 0.5  # returned when (high - close_last) / (high - open_first) >= this
 MIN_INTERVAL_MIN = 10.0  # closer returned events are one episode, not a bot
 MIN_WICK_TO_BASE = 2.0  # typical sweep must be this many times the base candle range
+MIN_ACTIVE_SHARE = 0.5  # share of non-spike candles that trade (high > low) [H]
 
 EVENT_COLUMNS = ["start", "wick", "open_first", "high", "close_last", "retrace"]
 
@@ -32,6 +34,7 @@ class WickStats:
     base_range: (
         float  # median (high - low) / close over non-spike candles (NaN if none)
     )
+    active_share: float  # share of non-spike candles with high > low (NaN if none)
     interval_median_min: float  # typical minutes between returned events (NaN if < 2)
     regularity: float  # 1 - coefficient of variation of those intervals, in [0, 1]
     score: float  # returned_events * wick_median * (1 + regularity); 0 unless gated in
@@ -71,13 +74,30 @@ def spike_events(klines: pd.DataFrame, min_wick: float) -> pd.DataFrame:
     return events.assign(retrace=retrace.fillna(0.0))
 
 
+def base_candles(klines: pd.DataFrame, min_wick: float) -> pd.DataFrame:
+    """The non-spike candles: the base the sweeps must stand out from."""
+    return klines[upper_wicks(klines) < min_wick]
+
+
 def base_range(klines: pd.DataFrame, min_wick: float) -> float:
     """Median (high - low) / close over non-spike candles; NaN when there are none."""
-    calm = klines[upper_wicks(klines) < min_wick]
+    calm = base_candles(klines, min_wick)
     if calm.empty:
         return math.nan
     ranges = (calm["high"] - calm["low"]) / calm["close"].where(calm["close"] > 0)
     return float(ranges.median())
+
+
+def active_share(klines: pd.DataFrame, min_wick: float) -> float:
+    """Share of non-spike candles with high > low; NaN when there are none.
+
+    A minute with a single print, or none, has no range: it is an empty base, not
+    a calm one, and a resting order in it has nothing to trade against.
+    """
+    calm = base_candles(klines, min_wick)
+    if calm.empty:
+        return math.nan
+    return float((calm["high"] > calm["low"]).mean())
 
 
 def wick_stats(klines: pd.DataFrame, min_wick: float) -> WickStats:
@@ -93,11 +113,13 @@ def wick_stats(klines: pd.DataFrame, min_wick: float) -> WickStats:
         regularity = max(0.0, 1.0 - float(cv))
     wick_median = float(returned["wick"].median()) if r else math.nan
     base = base_range(klines, min_wick)
+    active = active_share(klines, min_wick)
     is_pattern = (
         r >= MIN_EVENTS
         and interval_median >= MIN_INTERVAL_MIN
         and regularity > 0
         and wick_median >= MIN_WICK_TO_BASE * base  # False when base is NaN
+        and active >= MIN_ACTIVE_SHARE  # False when active is NaN
     )
     return WickStats(
         candles=len(klines),
@@ -107,6 +129,7 @@ def wick_stats(klines: pd.DataFrame, min_wick: float) -> WickStats:
         wick_max=float(events["wick"].max()) if n else math.nan,
         retrace_median=float(events["retrace"].median()) if n else math.nan,
         base_range=base,
+        active_share=active,
         interval_median_min=interval_median,
         regularity=regularity,
         score=r * wick_median * (1 + regularity) if is_pattern else 0.0,
@@ -122,6 +145,7 @@ COLUMNS = [
     "wick_median",
     "retrace_median",
     "base_range",
+    "active_share",
     "wick_max",
     "interval_median_min",
     "regularity",
