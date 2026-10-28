@@ -208,6 +208,16 @@ class FakeMexc:
         return httpx.Response(200, json=list(reversed(rows))[:1000])
 
 
+def test_approving_a_control_as_candidate_is_an_error_and_writes_nothing():
+    d = DatasetDefinition("spikes")
+    approve(d, STATS, SCREEN, ["SPIKEUSDT"], NOW, 0, 2.0, 0, "abc1234")
+    control = d.controls[0].market
+    before = d.to_json()
+    with pytest.raises(ValueError, match=f"{control}.*control.*SPIKEUSDT"):
+        approve(d, STATS, SCREEN, ["WEAKUSDT", control], NOW, 0, 2.0, 0, "abc1234")
+    assert d.to_json() == before
+
+
 @pytest.fixture
 def workdir(tmp_path):
     screen_dir = tmp_path / "reports" / SCREEN
@@ -348,6 +358,20 @@ def test_approve_reports_bad_screen_markets_and_venue_errors(workdir):
     # The definition and card are kept so the re-run only needs the download.
     assert load_definition(DatasetStore(workdir / "data"), "d").version == 1
     assert (workdir / "cards" / "d.md").is_file()
+
+
+def test_cli_refuses_to_approve_a_control(workdir):
+    args = ["--name", "d", "--no-download"]
+    assert (
+        run(workdir, FakeMexc(), ["approve", SCREEN, "SPIKEUSDT", *args]).exit_code == 0
+    )
+    store = DatasetStore(workdir / "data")
+    control = load_definition(store, "d").controls[0].market
+    result = run(workdir, FakeMexc(), ["approve", SCREEN, control, *args])
+    assert result.exit_code == 1, result.output
+    assert control in result.output and "control" in result.output
+    assert "all markets already in it" not in result.output
+    assert load_definition(store, "d").version == 1
 
 
 def test_list_and_show(workdir):

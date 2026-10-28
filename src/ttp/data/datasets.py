@@ -9,7 +9,8 @@ committed to the knowledge base as the provenance record backtests cite.
 
 Control draws are reproducible: each candidate's draw is seeded from the seed
 and the candidate's name, so adding candidates later leaves earlier controls
-unchanged, and the same screen, candidates and seed always pick the same controls.
+unchanged, and the same screen, candidates and seed always pick the same controls,
+whatever order the candidates are listed in.
 """
 
 import json
@@ -146,6 +147,9 @@ def select_controls(
     quiet), and not a candidate, an excluded market or an earlier pick. An empty
     pool widens the band (`band` squared, cubed, ...) up to `BAND_WIDENINGS`
     times; the ratio used is recorded in the pick.
+
+    Draws happen in sorted candidate order, so the pairings do not depend on the
+    order the candidates are listed in; the picks are returned in that order.
     """
     if not 0 <= max_events < MIN_EVENTS:
         raise ValueError(f"max_events must be in [0, {MIN_EVENTS})")
@@ -162,7 +166,7 @@ def select_controls(
     ]
     picks: list[ControlPick] = []
     taken: set[str] = set()
-    for candidate in candidates:
+    for candidate in sorted(set(candidates)):
         v = float(by_market.loc[candidate, "volume_24h"])
         for power in range(1, BAND_WIDENINGS + 1):
             ratio = band**power
@@ -197,14 +201,23 @@ def approve(
 ) -> list[DatasetMarket]:
     """Add candidates and their controls to the definition as a new version.
 
-    Candidates already in the dataset are skipped. Returns the markets added;
-    an empty list means nothing changed (and no version was added).
+    Candidates already in the dataset are skipped; a candidate that is one of
+    the dataset's controls is an error (nothing is changed). Controls are drawn
+    in sorted candidate order, so the order of `candidates` does not matter.
+    Returns the markets added; an empty list means nothing changed (and no
+    version was added).
     """
-    present = set(definition.symbols)
-    new = [c for c in dict.fromkeys(candidates) if c not in present]
+    roles = {m.market: m for m in definition.markets}
+    for c in candidates:
+        if c in roles and roles[c].role == CONTROL:
+            raise ValueError(
+                f"{c} is already in dataset '{definition.name}' as the control "
+                f"for {roles[c].paired_with}; it cannot be approved as a candidate"
+            )
+    new = [c for c in dict.fromkeys(candidates) if c not in roles]
     if not new:
         return []
-    picks = select_controls(stats, new, seed, band, max_control_events, present)
+    picks = select_controls(stats, new, seed, band, max_control_events, set(roles))
     version = definition.version + 1
     by_market = stats.set_index("market")
 
