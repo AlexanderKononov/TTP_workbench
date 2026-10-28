@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./**/.env)",
+      "Read(./**/.streamlit/secrets.toml)",
+      "Bash(git push origin main*)",
+      "Bash(git push * main)"
+    ]
+  },
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/telegram_notify.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
