@@ -30,6 +30,14 @@ DEPTH_LIMIT = 5000
 KLINES_PAGE_LIMIT = 500
 KLINE_INTERVALS_MS = {"1m": 60_000}
 
+# `GET /api/v3/aggTrades` (probed 2026-10-28): startTime and endTime must be sent
+# together, both inclusive, at most 1 h apart; at most 1000 rows, newest first;
+# timestamps are whole seconds; ids are null; history reaches back about 24 h.
+WEIGHT_AGG_TRADES = 1
+AGG_TRADES_PAGE_LIMIT = 1000
+AGG_TRADES_WINDOW_MS = 3_600_000
+AGG_TRADES_HISTORY_HOURS = 24
+
 
 class MexcError(Exception):
     """A MEXC request failed; the message is meant for the Owner."""
@@ -115,6 +123,33 @@ class Kline:
     close: float
     volume: float
     quote_volume: float
+
+
+@dataclass(frozen=True)
+class AggTrade:
+    """One aggregate trade print: same price, side and second combined by MEXC.
+
+    `buyer_is_maker` True means the aggressor sold (a down-tick); False means
+    the aggressor bought. MEXC returns no trade ids, so (time, price, quantity,
+    side) identifies a print.
+    """
+
+    time_ms: int
+    price: float
+    quantity: float
+    buyer_is_maker: bool
+
+
+def parse_agg_trades(payload: list[dict[str, Any]]) -> list[AggTrade]:
+    return [
+        AggTrade(
+            time_ms=int(t["T"]),
+            price=float(t["p"]),
+            quantity=float(t["q"]),
+            buyer_is_maker=bool(t["m"]),
+        )
+        for t in payload
+    ]
 
 
 def parse_exchange_info(payload: dict[str, Any]) -> list[SymbolInfo]:
@@ -239,6 +274,50 @@ class MexcClient:
             page = [k for k in page if start <= k.open_time_ms < end_ms]
             out.extend(page)
             start = page[-1].open_time_ms + step_ms if page else page_end
+        return out
+
+    def agg_trades(self, symbol: str, start_ms: int, end_ms: int) -> list[AggTrade]:
+        """Aggregate trades with time in [start_ms, end_ms), oldest first.
+
+        The range is walked in 1 h windows (MEXC's maximum). A window that comes
+        back full (1000 rows, newest first) is paged backwards: rows of its
+        oldest second are dropped and the window is re-asked up to that second,
+        so a second split across pages is still read whole. Only if one second
+        alone holds 1000+ prints are the rest lost; thin markets never get there.
+        """
+        out: list[AggTrade] = []
+        lo = start_ms
+        while lo < end_ms:
+            hi = min(end_ms - 1, lo + AGG_TRADES_WINDOW_MS)
+            window: list[AggTrade] = []  # newest first
+            page_hi = hi
+            while page_hi >= lo:
+                page = parse_agg_trades(
+                    self._get(
+                        "/api/v3/aggTrades",
+                        WEIGHT_AGG_TRADES,
+                        {
+                            "symbol": symbol,
+                            "startTime": lo,
+                            "endTime": page_hi,
+                            "limit": AGG_TRADES_PAGE_LIMIT,
+                        },
+                    )
+                )
+                page = [t for t in page if lo <= t.time_ms <= page_hi]
+                if len(page) < AGG_TRADES_PAGE_LIMIT:
+                    window.extend(page)
+                    break
+                oldest = page[-1].time_ms
+                whole = [t for t in page if t.time_ms > oldest]
+                if whole:
+                    window.extend(whole)
+                    page_hi = oldest
+                else:
+                    window.extend(page)
+                    page_hi = oldest - 1
+            out.extend(reversed(window))
+            lo = hi + 1
         return out
 
     def _get(self, path: str, weight: int, params: dict[str, Any] | None = None) -> Any:

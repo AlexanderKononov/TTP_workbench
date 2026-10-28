@@ -10,7 +10,9 @@ from ttp.venues.mexc.book import (
     Trade,
 )
 from ttp.venues.mexc.client import (
+    AGG_TRADES_HISTORY_HOURS,
     KLINE_INTERVALS_MS,
+    AggTrade,
     Kline,
     MexcClient,
     MexcError,
@@ -22,7 +24,9 @@ from ttp.venues.mexc.client import (
 from ttp.venues.mexc.stream import LiveBooks, MexcMarketStream, StreamStatus
 
 __all__ = [
+    "AGG_TRADES_HISTORY_HOURS",
     "KLINE_INTERVALS_MS",
+    "AggTrade",
     "BookEvent",
     "BookSnapshot",
     "BookSync",

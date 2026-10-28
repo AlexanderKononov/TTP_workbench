@@ -1,3 +1,5 @@
 - [MEXC klines quirks](mexc-klines-quirks.md) — 500-row cap, start needs end, [start,end), 30-day 1m depth, zero-volume fill
+- [MEXC aggTrades quirks](mexc-agg-trades-quirks.md) — ~24 h depth, 1 h inclusive windows, no ids, newest first; /trades useless; cold-pool TLS error
 - [uv venv corruption recovery](uv-venv-corruption.md) — interrupted uv add left NUL files in lock/venv/cache; how to recover
 - [Engine time semantics](engine-time-semantics.md) — klines stamped at close, broker-before-strategy ordering, timers from the feed, SOURCES registry
+- [Dataset approval design](dataset-approval-design.md) — dataset.json + card Definition section, control draw rules, cards committed only for Owner-approved datasets
