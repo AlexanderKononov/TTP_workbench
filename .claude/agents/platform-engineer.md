@@ -2,7 +2,7 @@
 name: platform-engineer
 description: Dev role. Use for venue connectors, the screener, the trading engine, the execution service, live monitoring and Telegram reporting.
 tools: Read, Grep, Glob, Write, Edit, Bash, WebSearch, WebFetch
-model: opus
+model: fable
 memory: project
 ---
 

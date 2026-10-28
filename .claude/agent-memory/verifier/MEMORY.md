@@ -1,0 +1,1 @@
+- [Verifier fixtures how-to](verify-fixtures-howto.md) — test file naming, scripted LiveBooks/Session, BookSync property sim, screener gate series, worktree bash limits

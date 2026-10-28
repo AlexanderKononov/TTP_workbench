@@ -1,0 +1,4 @@
+- [Venue API quirks](venue-api-quirks.md) — MEXC REST/WebSocket gotchas (weights, protobuf streams, version rules, refused-subscribe ack, invalid-symbol 400), no MEXC amend, ccxt book bug, Hyperliquid limits
+- [Tooling gotchas](tooling-gotchas.md) — slow git --ignored locks index; uv sync prunes root .venv; CliRunner prog_name/stderr order; cp1252 console; DuckDB threading and NULLs; worktree Bash refusals and branch creation; os.kill on Windows; fake-socket test hangs
+- [Telegram and secrets how-to](telegram-and-secrets-howto.md) — uv --env-file for live checks from worktrees; httpx logs the bot token; Telegram limits; test cross-imports
+- [Worktree tooling gotchas](worktree-tooling-gotchas.md) — branch via `checkout -b` from governor branch; plain bash only; cache copy and offline re-score tips

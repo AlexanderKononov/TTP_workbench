@@ -2,7 +2,7 @@
 name: strategist
 description: Trading role. Use for strategy design, spike-pattern definitions, risk, sizing, venue/coin research, and reviewing trading results on request.
 tools: Read, Grep, Glob, Write, Edit, WebSearch, WebFetch
-model: opus
+model: fable
 memory: project
 ---
 

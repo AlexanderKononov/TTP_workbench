@@ -28,16 +28,19 @@ These hold for every agent, every role, every task:
 | [docs/adr/](docs/adr/) | Architecture decisions. Read the ones touching your area; flag conflicts explicitly |
 | [docs/agents/roles.md](docs/agents/roles.md) | Roles, gates, branch/PR workflow. **Read before dispatching or acting as a role** |
 | [docs/agents/](docs/agents/) | Issue tracker and domain-doc rules |
-| `strategies/<name>/STRATEGY.md` | Approved strategy definition, next to its code |
+| `src/ttp/strategies/<name>/STRATEGY.md` | Approved strategy definition, next to its code |
 | [docs/knowledge-base/](docs/knowledge-base/) | Venues, markets, strategies research, dataset cards |
 | [.scratch/](.scratch/) | Agent working area: specs, tickets, maps, per feature |
-| [docs/legacy.md](docs/legacy.md) | Pre-pivot code (`tearsheet/`, `data/`, root bot stubs). Read before touching those dirs |
+| [src/ttp/](src/ttp/) | The trading system package; layout per [docs/architecture.md](docs/architecture.md) |
+| [archive/](archive/README.md) | Pre-pivot code (tearsheet app, Yahoo `data/` pipeline, Alpaca bot stubs). Not part of the package; read its README before touching it |
 
 ## Working conventions
 
-- No shared build/lint/test command exists yet; there is no linter or formatter config. Each legacy piece runs from its own directory (see [docs/legacy.md](docs/legacy.md)).
+- One project managed with uv (`pyproject.toml` + `uv.lock`). Setup: `uv sync`. CLI: `uv run ttp --help`.
+- Test: `uv run pytest`. Lint and format: `uv run ruff check` and `uv run ruff format --check` (fix with `uv run ruff check --fix` / `uv run ruff format`). All three must pass before a PR.
+- `archive/` is excluded from ruff and pytest; each archived piece runs from its own directory (see [archive/README.md](archive/README.md)).
 - Platform is Windows (PowerShell primary); a Python 3.11 dev container also exists in `.devcontainer/`.
-- Gitignored and absent from fresh checkouts: `.env`, `.streamlit/`, `data/raw/`, `data/metadata.db`.
+- Gitignored and absent from fresh checkouts: `.env`, `.streamlit/`, `.venv/`, root `data/` (recorded datasets) and root `reports/` (screener output).
 
 ## Agent skills
 

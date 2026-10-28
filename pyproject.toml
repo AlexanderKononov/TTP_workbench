@@ -1,0 +1,40 @@
+[project]
+name = "ttp"
+version = "0.1.0"
+description = "Human-confirmed crypto trading system for low-liquidity venues"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1,<9",
+    "duckdb>=2.0,<3",
+    "httpx>=0.28,<1",
+    "matplotlib>=3.11.2",
+    "pandas>=3.1,<4",
+    "websockets>=15,<18",
+]
+
+[project.scripts]
+ttp = "ttp.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.17,<0.18",
+]
+
+[build-system]
+requires = ["uv_build>=0.10,<0.11"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--import-mode=importlib", "-m", "not live"]
+markers = ["live: hits real venue endpoints over the network (opt in: -m live)"]
+
+[tool.ruff]
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["archive", ".claude/worktrees"]
+
+[tool.ruff.lint]
+extend-select = ["I"]

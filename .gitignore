@@ -206,14 +206,22 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Data
-data/raw/
-data/processed/
-data/metadata.db
+# Data and reports (recorded datasets, screener output); root only
+/data/
+/reports/
+archive/data/raw/
+archive/data/processed/
+archive/data/metadata.db
 
 .streamlit/
-!tearsheet/.streamlit/
-!tearsheet/.streamlit/secrets.toml.example
+!archive/tearsheet/.streamlit/
+!archive/tearsheet/.streamlit/secrets.toml.example
 # Claude Code local-only files
 .claude/settings.local.json
 .claude/agent-memory-local/
+
+# Ad-hoc dataset cards are scratch; cards for approved datasets are committed
+docs/knowledge-base/datasets/adhoc*.md
+
+# Agent worktrees
+.claude/worktrees/

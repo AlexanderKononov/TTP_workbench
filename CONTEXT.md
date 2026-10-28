@@ -32,8 +32,8 @@ The intended loop:
 
 ## Current status (2026-10-27)
 
-- **Phase: scope definition.** No code for the crypto system exists yet. The next step is a grilling session to define scope, milestones and aims; its output lands in `.scratch/project-scope/`, `GLOSSARY.md` and `docs/adr/`.
-- **Pre-pivot code** in the repo (equities/Alpaca bot stubs, a Yahoo Finance data pipeline, a working trade tearsheet app) is described in [docs/legacy.md](docs/legacy.md). Whether each piece is kept, reused or retired is an open question.
+- **Phase: initial infrastructure, M0–M2 built (2026-10-28), awaiting Owner review.** Venue: MEXC spot ([ADR-0007](docs/adr/0007-mexc-spot-first-venue.md)). Structure: [docs/architecture.md](docs/architecture.md). Built: MEXC connector (REST + own WebSocket book), kline/trade downloader, Parquet+DuckDB datasets, screener v3, Telegram reports, dataset approval with controls, recorder, event-driven engine with replay feed. Pending Owner gates: gate 2 (`up-spike-harvest` definition), gate 7 (first dataset, see `.scratch/initial-infrastructure/gate-7-recommendation.md`), merge of the M0–M2 PR. Next: M3 (backtest), M4 (paper trading), M5 (execution service at minimum size), M6 (first live case: $50). Spec, tickets and backlog: `.scratch/initial-infrastructure/`.
+- **Pre-pivot code** in the repo (equities/Alpaca bot stubs, a Yahoo Finance data pipeline, a working trade tearsheet app) is archived under `archive/` and described in [archive/README.md](archive/README.md). It is kept for reference and possible reuse.
 
 ## Open questions for the scoping session
 
@@ -48,5 +48,5 @@ Starting points only; the grilling session owns the real list.
 - **Execution**: order types, partial fills, who monitors open positions, what triggers an exit?
 - **Backtesting**: engine (hand-rolled, backtrader, vectorbt…), and how to model thin order books and slippage honestly.
 - **Data**: sources for historical OHLCV/order-book/trade data, storage layout, retention.
-- **Legacy code**: keep, reuse (e.g. tearsheet for post-trade analysis, `data/` pipeline patterns) or retire.
+- **Legacy code** (now in `archive/`): reuse (e.g. tearsheet for post-trade analysis, `data/` pipeline patterns) or delete.
 - **Runtime**: where the system runs (local, server, cloud), and how it is scheduled.
