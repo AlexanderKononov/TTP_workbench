@@ -22,13 +22,18 @@ def thin_markets(
     tickers: Iterable[Ticker24h],
     max_volume: float,
     min_volume: float = 0.0,
+    include_st: bool = True,
 ) -> list[MarketVolume]:
-    """API-tradable USDT/USDC markets with min <= 24h quote volume <= max, highest first."""
+    """API-tradable USDT/USDC markets with min <= 24h quote volume <= max, highest first.
+
+    `include_st=False` drops markets MEXC flags `st` (special treatment).
+    """
     volume = {t.symbol: t.quote_volume for t in tickers}
     markets = [
         MarketVolume(s.symbol, s.base_asset, s.quote_asset, volume[s.symbol])
         for s in symbols
         if s.api_tradable
+        and (include_st or not s.st)
         and s.quote_asset in QUOTE_ASSETS
         and s.symbol in volume
         and min_volume <= volume[s.symbol] <= max_volume

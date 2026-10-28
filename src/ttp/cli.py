@@ -4,11 +4,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import click
+import pandas as pd
 
 from ttp import __version__
 from ttp.data.cards import current_commit, render_card, write_card
 from ttp.data.downloader import download_klines
 from ttp.data.store import DATASET_NAME, DatasetStore
+from ttp.screener.report import REPORTS_ROOT, write_report
+from ttp.screener.screen import ScreenParams, scan, universe
 from ttp.screener.universe import thin_markets
 from ttp.venues.mexc import MexcClient, MexcError
 
@@ -140,3 +143,128 @@ def download_klines_cmd(
             "(MEXC returned no candles for them; see the dataset card)"
         )
     click.echo(f"dataset card: {card.as_posix()}")
+
+
+@main.command()
+@click.option(
+    "--max-volume",
+    type=click.FloatRange(min=0),
+    default=100_000,
+    show_default=True,
+    help="Upper bound of 24h quote volume, USD.",
+)
+@click.option(
+    "--min-volume",
+    type=click.FloatRange(min=0),
+    default=0.0,
+    show_default=True,
+    help="Lower bound of 24h quote volume, USD.",
+)
+@click.option(
+    "--hours",
+    type=click.IntRange(min=1, max=30 * 24),
+    default=24,
+    show_default=True,
+    help="Hours of 1-minute klines to scan, back from now.",
+)
+@click.option(
+    "--top",
+    type=click.IntRange(min=1),
+    default=10,
+    show_default=True,
+    help="How many candidates to chart and list.",
+)
+@click.option(
+    "--min-wick",
+    type=click.FloatRange(min=0, min_open=True),
+    default=0.02,
+    show_default=True,
+    help="Smallest upper wick counted as a spike, as a fraction of the candle body top.",
+)
+@click.option(
+    "--chart-hours",
+    type=click.IntRange(min=1),
+    default=6,
+    show_default=True,
+    help="Hours shown on each candidate's chart.",
+)
+@click.option(
+    "--include-st",
+    is_flag=True,
+    help="Also scan markets MEXC flags 'st' (special treatment); excluded by default.",
+)
+@click.pass_context
+def screen(
+    ctx: click.Context,
+    max_volume: float,
+    min_volume: float,
+    hours: int,
+    top: int,
+    min_wick: float,
+    chart_hours: int,
+    include_st: bool,
+) -> None:
+    """Rank thin MEXC markets by recurring upper wicks and write a chart report.
+
+    Scans every API-tradable USDT/USDC market in the volume band. Klines are
+    cached in the 'screener' dataset under data/datasets/, so re-running over
+    the same window is free. The report goes to reports/screens/<screen-id>/.
+    Run from the repo root.
+    """
+    if min_volume > max_volume:
+        raise click.BadParameter(
+            "must not exceed --max-volume", param_hint="--min-volume"
+        )
+    obj = ctx.obj
+    params = ScreenParams(max_volume, min_volume, hours, min_wick, include_st)
+    store = DatasetStore(obj.get("data_root", DATA_ROOT))
+    now = obj.get("now", lambda: datetime.now(UTC))()
+    client = obj.get("mexc") or MexcClient()
+    try:
+        with client:
+            markets = universe(client, params)
+            with click.progressbar(
+                length=len(markets),
+                label=f"scanning {len(markets)} markets",
+                item_show_func=lambda m: m.symbol if m else "",
+            ) as bar:
+                result = scan(
+                    client,
+                    store,
+                    markets,
+                    now,
+                    params,
+                    len(markets),
+                    progress=lambda m: bar.update(1, m),
+                )
+    except MexcError as exc:
+        raise click.ClickException(str(exc)) from exc
+    out = write_report(
+        result,
+        store,
+        Path(obj.get("reports_root", REPORTS_ROOT)),
+        top,
+        min(chart_hours, hours),
+    )
+    click.echo(
+        f"{'#':>3} {'MARKET':<14} {'SCORE':>7} {'EVENTS':>6} {'WICK':>7} "
+        f"{'INTERVAL':>8} {'REGULAR':>7} {'24H VOLUME':>12}"
+    )
+    for r in result.table.head(top).itertuples(index=False):
+        interval = (
+            "-" if pd.isna(r.interval_median_min) else f"{r.interval_median_min:.0f}"
+        )
+        wick = "-" if pd.isna(r.wick_median) else f"{r.wick_median:.2%}"
+        click.echo(
+            f"{r.rank:>3} {r.market:<14} {r.score:>7.2f} {r.wick_count:>6} {wick:>7} "
+            f"{interval:>8} {r.regularity:>7.2f} {r.volume_24h:>12,.0f}"
+        )
+    click.echo(
+        f"scanned {len(result.table)} of {result.universe} markets, "
+        f"{result.start:%Y-%m-%d %H:%M} to {result.end:%Y-%m-%d %H:%M} UTC"
+    )
+    if result.skipped:
+        n = len(result.skipped)
+        click.echo(f"skipped {n} market{'s' if n != 1 else ''} (see report)")
+    click.echo(f"report: {out.as_posix()}")
+    click.echo(f"screen id: {result.screen_id}")

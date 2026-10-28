@@ -1,5 +1,6 @@
 """MEXC spot public REST client. Public endpoints only: no credentials here (ADR-0004)."""
 
+import threading
 import time
 from collections import deque
 from collections.abc import Callable
@@ -27,8 +28,16 @@ class MexcError(Exception):
     """A MEXC request failed; the message is meant for the Owner."""
 
 
+class MexcRateLimited(MexcError):
+    """MEXC answered 429/418: stop sending, or the IP gets banned."""
+
+
 class WeightLimiter:
-    """Sliding-window request-weight budget; blocks until a request fits."""
+    """Sliding-window request-weight budget; blocks until a request fits.
+
+    Safe to share between threads: the budget is one per IP, however many
+    requests run at once.
+    """
 
     def __init__(
         self,
@@ -42,18 +51,21 @@ class WeightLimiter:
         self._clock = clock
         self._sleep = sleep
         self._spent: deque[tuple[float, int]] = deque()
+        self._lock = threading.Lock()
 
     def acquire(self, weight: int) -> None:
         if weight > self._limit:
             raise ValueError(f"weight {weight} exceeds limit {self._limit}")
         while True:
-            now = self._clock()
-            while self._spent and self._spent[0][0] <= now - self._window_s:
-                self._spent.popleft()
-            if sum(w for _, w in self._spent) + weight <= self._limit:
-                self._spent.append((now, weight))
-                return
-            self._sleep(self._spent[0][0] + self._window_s - now)
+            with self._lock:
+                now = self._clock()
+                while self._spent and self._spent[0][0] <= now - self._window_s:
+                    self._spent.popleft()
+                if sum(w for _, w in self._spent) + weight <= self._limit:
+                    self._spent.append((now, weight))
+                    return
+                wait = self._spent[0][0] + self._window_s - now
+            self._sleep(wait)
 
 
 @dataclass(frozen=True)
@@ -66,6 +78,7 @@ class SymbolInfo:
     status: str
     spot_trading_allowed: bool
     permissions: tuple[str, ...]
+    st: bool = False  # MEXC "special treatment" flag: risk-warned, may be delisted
 
     @property
     def api_tradable(self) -> bool:
@@ -106,6 +119,7 @@ def parse_exchange_info(payload: dict[str, Any]) -> list[SymbolInfo]:
             status=str(s["status"]),
             spot_trading_allowed=bool(s["isSpotTradingAllowed"]),
             permissions=tuple(s.get("permissions", ())),
+            st=bool(s.get("st", False)),
         )
         for s in payload["symbols"]
     ]
@@ -210,7 +224,7 @@ class MexcClient:
             raise MexcError(f"could not reach MEXC ({path}): {exc}") from exc
         if response.status_code in (418, 429):
             retry_after = response.headers.get("Retry-After", "?")
-            raise MexcError(
+            raise MexcRateLimited(
                 f"MEXC rate limit hit on {path} (HTTP {response.status_code}); "
                 f"retry after {retry_after} s"
             )
