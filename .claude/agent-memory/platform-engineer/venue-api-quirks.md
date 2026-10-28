@@ -11,3 +11,5 @@ metadata:
 - ccxt.pro mexc `watchOrderBook` had an open bug (2026-09-25) losing deltas (fromVersion vs toVersion) — maintain book ourselves.
 - Hyperliquid `spotMetaAndAssetCtxs`: ctx array (1164) is longer than universe (347); index ctxs by `universe[].index`.
 - Hyperliquid address rate limit = 1 action per $1 traded (+10k buffer) — hostile to many-resting-orders/low-fill strategies.
+- MEXC spot IP limits (docs intro, 2026-10-28): IP-weighted endpoints share 300 weight / 10 s; `exchangeInfo` and `ticker/24hr` weigh 25 each. 429/418 carry `Retry-After`; continuing after 429 leads to an IP ban. Current docs live under mexc.co/api-docs/spot-v3/market-data-endpoints/<page>.
+- MEXC `ticker/24hr` `count` is null; `quoteVolume` is a string. `tradeSideType` 4 + status "2" = delisted.

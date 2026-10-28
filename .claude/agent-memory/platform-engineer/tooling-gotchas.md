@@ -9,3 +9,4 @@ metadata:
 - `uv sync` reuses the existing root `.venv` and removes packages not in `uv.lock`; the first sync after the legacy env was slow (many uninstalls).
 - Click `CliRunner` shows `Usage: main` unless you pass `prog_name="ttp"` to `invoke`.
 - Single commands: `uv run pytest`, `uv run ruff check`, `uv run ruff format --check` (see CLAUDE.md).
+- `python -I` ignores PYTHONUTF8; MEXC JSON has non-cp1252 chars, so use `-X utf8` or `open(..., encoding="utf-8")`. On Windows python, write paths as `C:/...`, not `/c/...`.
