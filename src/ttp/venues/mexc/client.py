@@ -16,6 +16,11 @@ IP_WEIGHT_LIMIT = 300
 IP_WEIGHT_WINDOW_S = 10.0
 WEIGHT_EXCHANGE_INFO = 25
 WEIGHT_TICKER_24HR = 25
+WEIGHT_KLINES = 1
+
+# `GET /api/v3/klines` returns at most 500 rows per request, whatever `limit` asks.
+KLINES_PAGE_LIMIT = 500
+KLINE_INTERVALS_MS = {"1m": 60_000}
 
 
 class MexcError(Exception):
@@ -79,6 +84,19 @@ class Ticker24h:
     quote_volume: float
 
 
+@dataclass(frozen=True)
+class Kline:
+    """One candle; `open_time_ms` (UTC epoch ms) identifies it."""
+
+    open_time_ms: int
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    quote_volume: float
+
+
 def parse_exchange_info(payload: dict[str, Any]) -> list[SymbolInfo]:
     return [
         SymbolInfo(
@@ -101,6 +119,22 @@ def parse_tickers_24h(payload: list[dict[str, Any]]) -> list[Ticker24h]:
             quote_volume=float(t["quoteVolume"] or 0),
         )
         for t in payload
+    ]
+
+
+def parse_klines(payload: list[list[Any]]) -> list[Kline]:
+    # Row: open time, open, high, low, close, volume, close time, quote volume.
+    return [
+        Kline(
+            open_time_ms=int(row[0]),
+            open=float(row[1]),
+            high=float(row[2]),
+            low=float(row[3]),
+            close=float(row[4]),
+            volume=float(row[5]),
+            quote_volume=float(row[7]),
+        )
+        for row in payload
     ]
 
 
@@ -135,6 +169,38 @@ class MexcClient:
 
     def tickers_24h(self) -> list[Ticker24h]:
         return parse_tickers_24h(self._get("/api/v3/ticker/24hr", WEIGHT_TICKER_24HR))
+
+    def klines(
+        self, symbol: str, start_ms: int, end_ms: int, interval: str = "1m"
+    ) -> list[Kline]:
+        """Candles opening in [start_ms, end_ms), oldest first, paging as needed.
+
+        MEXC ignores `startTime` unless `endTime` is also sent, so every page
+        sends both. Empty pages (before the venue's history window, or before
+        listing) advance by one full page so later data is still found.
+        """
+        step_ms = KLINE_INTERVALS_MS[interval]
+        out: list[Kline] = []
+        start = start_ms
+        while start < end_ms:
+            page_end = min(end_ms, start + KLINES_PAGE_LIMIT * step_ms)
+            page = parse_klines(
+                self._get(
+                    "/api/v3/klines",
+                    WEIGHT_KLINES,
+                    {
+                        "symbol": symbol,
+                        "interval": interval,
+                        "startTime": start,
+                        "endTime": page_end,
+                        "limit": KLINES_PAGE_LIMIT,
+                    },
+                )
+            )
+            page = [k for k in page if start <= k.open_time_ms < end_ms]
+            out.extend(page)
+            start = page[-1].open_time_ms + step_ms if page else page_end
+        return out
 
     def _get(self, path: str, weight: int, params: dict[str, Any] | None = None) -> Any:
         self._limiter.acquire(weight)
