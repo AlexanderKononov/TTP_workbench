@@ -21,6 +21,14 @@ from ttp.data.datasets import (
     save_definition,
 )
 from ttp.data.downloader import download_klines, download_trades
+from ttp.data.recorder import (
+    ALERT_AFTER_S,
+    FLUSH_INTERVAL_S,
+    STALE_AFTER_S,
+    Recorder,
+    read_status,
+    request_stop,
+)
 from ttp.data.store import DATASET_NAME, DatasetStore
 from ttp.notify import (
     DEV_BOT,
@@ -639,4 +647,176 @@ def dataset_show(ctx: click.Context, name: str) -> None:
         click.echo(
             f"  {s.market:<14} {s.data_type.name:<10} {s.first:{fmt}} to "
             f"{s.last:{fmt}} UTC, {s.rows:,} rows"
+        )
+
+
+@main.group()
+def record() -> None:
+    """Record an approved dataset's markets live: trades, 1 s book, gap log."""
+
+
+@record.command("start")
+@click.argument("name", callback=_dataset)
+@click.option(
+    "--seconds",
+    type=click.FloatRange(min=0),
+    default=None,
+    help="Stop after this many seconds (default: run until Ctrl-C or `record stop`).",
+)
+@click.option(
+    "--flush-interval",
+    type=click.FloatRange(min=1),
+    default=FLUSH_INTERVAL_S,
+    show_default=True,
+    help="Seconds between writes of buffered rows to Parquet.",
+)
+@click.option(
+    "--alert-after",
+    type=click.FloatRange(min=1),
+    default=ALERT_AFTER_S,
+    show_default=True,
+    help="Seconds a market may stay without a synced book before a Telegram alert.",
+)
+@click.pass_context
+def record_start(
+    ctx: click.Context,
+    name: str,
+    seconds: float | None,
+    flush_interval: float,
+    alert_after: float,
+) -> None:
+    """Record dataset NAME's markets until stopped (Ctrl-C or `ttp record stop`).
+
+    Every trade, a top-20 book snapshot each second and a gap log go to the
+    dataset's Parquet partitions under data/datasets/, written every
+    --flush-interval seconds and on stop. Connections reconnect and resync on
+    their own; a market without a synced book for --alert-after seconds is
+    reported to the dev Telegram bot (if configured). Run from the repo root.
+    """
+    obj = ctx.obj
+    store = DatasetStore(obj.get("data_root", DATA_ROOT))
+    definition = load_definition(store, name)
+    if definition is None:
+        raise click.ClickException(f"no approved dataset '{name}'")
+    if not definition.symbols:
+        raise click.ClickException(f"dataset '{name}' has no markets")
+    clock = obj.get("clock", time.time)
+    running = [s for s in read_status(store, clock()) if s.dataset == name]
+    if running and not running[0].stale:
+        raise click.ClickException(
+            f"dataset '{name}' is already being recorded (pid {running[0].pid}); "
+            "stop it first with `ttp record stop`"
+        )
+    notifier = obj.get("telegram")
+    if notifier is None:
+        config = load_bot_config(
+            DEV_BOT, obj.get("env", os.environ), obj.get("env_file", ENV_FILE)
+        )
+        if config is None:
+            token, chat = env_names(DEV_BOT)
+            click.echo(
+                f"warning: Telegram alerts off: set {token} and {chat} "
+                "in the environment or .env",
+                err=True,
+            )
+        else:
+            notifier = TelegramNotifier(config)
+    client = obj.get("mexc") or MexcClient()
+    recorder = Recorder(
+        store,
+        name,
+        definition.venue,
+        definition.symbols,
+        client,
+        stream_factory=obj.get("stream", MexcMarketStream),
+        notify=notifier.send_text if notifier is not None else None,
+        log=lambda line: _echo(f"{datetime.now(UTC):%H:%M:%S} {line}"),
+        clock=clock,
+        sleep=obj.get("sleep", time.sleep),
+        flush_interval_s=flush_interval,
+        alert_after_s=alert_after,
+    )
+    n, c = len(definition.symbols), len(recorder.connections)
+    click.echo(
+        f"recording dataset '{name}': {n} market{'s' if n != 1 else ''} over "
+        f"{c} connection{'s' if c != 1 else ''} -> {store.dataset_dir(name).as_posix()}"
+    )
+    try:
+        with client:
+            recorder.run(seconds)
+    except MexcError as exc:
+        raise click.ClickException(str(exc)) from exc
+    finally:
+        if notifier is not None:
+            notifier.close()
+    written = recorder.written
+    click.echo(
+        "stopped; rows written: "
+        + ", ".join(f"{t} {written[t]:,}" for t in ("trades", "book_1s", "gaps"))
+    )
+
+
+@record.command("stop")
+@click.argument("name", callback=_dataset)
+@click.option(
+    "--timeout",
+    type=click.FloatRange(min=1),
+    default=30.0,
+    show_default=True,
+    help="Seconds to wait for the recorder to flush and exit.",
+)
+@click.pass_context
+def record_stop(ctx: click.Context, name: str, timeout: float) -> None:
+    """Stop recording dataset NAME (the recorder flushes and exits)."""
+    obj = ctx.obj
+    store = DatasetStore(obj.get("data_root", DATA_ROOT))
+    outcome = request_stop(
+        store,
+        name,
+        now=obj.get("clock", time.time),
+        sleep=obj.get("sleep", time.sleep),
+        timeout_s=timeout,
+    )
+    if outcome == "timeout":
+        raise click.ClickException(
+            f"dataset '{name}': recorder did not exit within {timeout:g} s"
+        )
+    click.echo(
+        {
+            "stopped": f"dataset '{name}': recording stopped",
+            "not running": f"dataset '{name}' is not being recorded",
+            "cleared": (
+                f"dataset '{name}': its recorder stopped heartbeating (process "
+                "gone); cleared the stale run file"
+            ),
+        }[outcome]
+    )
+
+
+@record.command("status")
+@click.pass_context
+def record_status(ctx: click.Context) -> None:
+    """Show which datasets are being recorded."""
+    obj = ctx.obj
+    store = DatasetStore(obj.get("data_root", DATA_ROOT))
+    statuses = read_status(store, obj.get("clock", time.time)())
+    if not statuses:
+        click.echo("no recorder running")
+        return
+    click.echo(
+        f"{'DATASET':<24} {'STATE':<10} {'PID':>7} {'SYNCED':>7} {'CONN':>4} "
+        f"{'TRADES':>8} {'BOOK_1S':>8} {'GAPS':>6}  STARTED (UTC)"
+    )
+    for s in statuses:
+        state = f"stale {s.age_s:.0f}s" if s.stale else "running"
+        click.echo(
+            f"{s.dataset:<24} {state:<10} {s.pid:>7} {s.synced:>3}/{s.markets:<3} "
+            f"{s.connections:>4} {s.written.get('trades', 0):>8,} "
+            f"{s.written.get('book_1s', 0):>8,} {s.written.get('gaps', 0):>6,}  "
+            f"{s.started:%Y-%m-%d %H:%M:%S}"
+        )
+    if any(s.stale for s in statuses):
+        click.echo(
+            f"stale: no heartbeat for over {STALE_AFTER_S:.0f} s, so the process is "
+            "probably gone (`ttp record stop <dataset>` clears it)"
         )

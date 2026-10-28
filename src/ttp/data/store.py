@@ -6,8 +6,13 @@ Layout under the data root (gitignored `data/datasets/` by default):
 
 Times are stored as naive UTC timestamps and returned tz-aware (UTC). Each data
 type declares its time column, its dedup key and, if it is sampled on a fixed
-grid, its interval (used to find gaps). New data types (trades, 1 s book
-snapshots) are added to `DATA_TYPES`; the layout and reader stay the same.
+grid, its interval (used to find gaps). New data types are added to
+`DATA_TYPES`; the layout and reader stay the same.
+
+Two writers share a date partition: `write` (downloads) merges into the day's
+`data.parquet`, `append` (the recorder) merges into an hourly `part-HH.parquet`.
+A row's file follows from its time, so a key is deduplicated within its file;
+the reader simply unions every file of the partition.
 """
 
 import os
@@ -29,6 +34,11 @@ class DataType:
     key: tuple[str, ...]
     columns: dict[str, str]  # column -> DuckDB type, in stored order
     interval: timedelta | None = None  # fixed sampling grid, if any
+
+    @property
+    def timestamp_columns(self) -> list[str]:
+        """Every TIMESTAMP column: stored naive UTC, returned tz-aware."""
+        return [c for c, t in self.columns.items() if t == "TIMESTAMP"]
 
 
 KLINES_1M = DataType(
@@ -62,7 +72,50 @@ TRADES = DataType(
     },
 )
 
-DATA_TYPES = {t.name: t for t in (KLINES_1M, TRADES)}
+BOOK_DEPTH = 20
+
+
+def _book_columns(depth: int) -> dict[str, str]:
+    """Wide layout: one row per sample, `bid_price_1..depth` etc. (see `BOOK_1S`)."""
+    columns = {"time": "TIMESTAMP", "version": "BIGINT"}
+    for level in range(1, depth + 1):
+        for column in ("bid_price", "bid_qty", "ask_price", "ask_qty"):
+            columns[f"{column}_{level}"] = "DOUBLE"
+    return columns
+
+
+# Top of the order book once a second, sampled from the locally synced book
+# (level 1 is the best price). One wide row per second rather than one row per
+# level: "the best N levels at time t" is then a single-row read of 4N columns
+# (DuckDB reads only the columns projected) instead of 40 rows and a pivot, and
+# per-level columns barely change between seconds, so they compress to almost
+# nothing. Levels a thin book lacks are NULL. `version` is the venue's book
+# version the sample was taken at.
+BOOK_1S = DataType(
+    name="book_1s",
+    time_column="time",
+    key=("time",),
+    columns=_book_columns(BOOK_DEPTH),
+    interval=timedelta(seconds=1),
+)
+
+# The recorder's gap log: every sync state change of a market's recording
+# (`kind` as in `BookEvent`, plus `start`, `stop`, `stream_error` and `missing`
+# for an interval [time, until) without a synced book). Backtests read it to
+# tell absent data from a quiet market.
+GAPS = DataType(
+    name="gaps",
+    time_column="time",
+    key=("time", "kind", "detail"),
+    columns={
+        "time": "TIMESTAMP",
+        "kind": "VARCHAR",
+        "until": "TIMESTAMP",
+        "detail": "VARCHAR",
+    },
+)
+
+DATA_TYPES = {t.name: t for t in (KLINES_1M, TRADES, BOOK_1S, GAPS)}
 PART_FILE = "data.parquet"
 
 
@@ -126,15 +179,44 @@ class DatasetStore:
         Rows whose key is already stored replace the stored row, so re-running a
         download never duplicates data.
         """
+        return self._merge(dataset, venue, market, data_type, rows, "%Y-%m-%d")
+
+    def append(
+        self,
+        dataset: str,
+        venue: str,
+        market: str,
+        data_type: DataType,
+        rows: pd.DataFrame,
+    ) -> int:
+        """Merge rows into hourly part files; returns how many rows are new.
+
+        For writers that add a little data often (the recorder): each flush
+        rewrites at most the current hour's file, never the whole day.
+        """
+        return self._merge(dataset, venue, market, data_type, rows, "%Y-%m-%d/%H")
+
+    def _merge(
+        self,
+        dataset: str,
+        venue: str,
+        market: str,
+        data_type: DataType,
+        rows: pd.DataFrame,
+        bucket: str,
+    ) -> int:
         if rows.empty:
             return 0
         rows = rows[list(data_type.columns)].copy()
-        rows[data_type.time_column] = _naive_utc(rows[data_type.time_column])
+        for column in data_type.timestamp_columns:
+            rows[column] = _naive_utc(rows[column])
         base = self.series_dir(dataset, venue, market, data_type)
         added = 0
-        days = rows[data_type.time_column].dt.date
-        for day, part in rows.groupby(days, sort=True):
-            path = base / f"date={day.isoformat()}" / PART_FILE
+        buckets = rows[data_type.time_column].dt.strftime(bucket)
+        for key, part in rows.groupby(buckets, sort=True):
+            day, _, hour = key.partition("/")
+            name = f"part-{hour}.parquet" if hour else PART_FILE
+            path = base / f"date={day}" / name
             stored = self._read_files([path], data_type) if path.exists() else None
             merged = pd.concat([d for d in (stored, part) if d is not None])
             merged = merged.drop_duplicates(list(data_type.key), keep="last")
@@ -156,7 +238,8 @@ class DatasetStore:
         start, end = _bound(start), _bound(end)
         files = self._files(dataset, venue, market, data_type, start, end)
         df = self._read_files(files, data_type, start, end)
-        df[data_type.time_column] = df[data_type.time_column].dt.tz_localize("UTC")
+        for column in data_type.timestamp_columns:
+            df[column] = df[column].dt.tz_localize("UTC")
         return df.reset_index(drop=True)
 
     def series(self, dataset: str) -> list[Series]:

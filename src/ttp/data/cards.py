@@ -57,7 +57,42 @@ SOURCES = {
             ),
             (
                 "Trades have no grid, so missing hours cannot be told from quiet ones; "
-                "gaps are not listed for them. Recorded trades (M1) come with a gap log."
+                "gaps are not listed for them. Recorded trades (from `ttp record`, "
+                "millisecond times, one row per print) share this series; where "
+                "download and recording overlap, the same print can appear once in "
+                "each form."
+            ),
+        ),
+    ),
+    ("mexc", "book_1s"): SourceInfo(
+        source=(
+            "`ttp record`: local order book synced from the MEXC spot WebSocket "
+            "depth-diff stream plus REST snapshots, sampled once a second"
+        ),
+        resolution=(
+            "top-20 book levels at 1 s (`book_1s`): `bid_price_n`/`bid_qty_n`/"
+            "`ask_price_n`/`ask_qty_n` for level n = 1 (best) to 20, plus the "
+            "venue's book `version`; sample time is the recorder's clock, UTC"
+        ),
+        quirks=(
+            (
+                "Samples exist only while the recorder ran and its book was synced; "
+                "missing steps below are such intervals, detailed in the `gaps` log. "
+                "Levels a thin book lacks are NULL."
+            ),
+        ),
+    ),
+    ("mexc", "gaps"): SourceInfo(
+        source="`ttp record`: the recorder's own sync state changes",
+        resolution=(
+            "gap log (`gaps`): `kind` is `start`, `stop`, `synced`, `gap`, "
+            "`stale_snapshot`, `snapshot_failed`, `disconnected`, `stream_error` or "
+            "`missing` (an interval [`time`, `until`) without a synced book)"
+        ),
+        quirks=(
+            (
+                "Between a `stop` and the next `start`, and inside every `missing` "
+                "interval, trades and book samples are absent, not quiet."
             ),
         ),
     ),

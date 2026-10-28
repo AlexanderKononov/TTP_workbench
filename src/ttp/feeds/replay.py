@@ -14,14 +14,24 @@ klines; trades and 1 s snapshots may need per-day chunking later.
 """
 
 import heapq
+import math
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import pandas as pd
 
-from ttp.core import Kline, Market, MarketEvent, Side, Timer, Trade
-from ttp.data.store import KLINES_1M, TRADES, DatasetStore, Series
+from ttp.core import (
+    BookLevel,
+    BookSnapshot,
+    Kline,
+    Market,
+    MarketEvent,
+    Side,
+    Timer,
+    Trade,
+)
+from ttp.data.store import BOOK_1S, BOOK_DEPTH, KLINES_1M, TRADES, DatasetStore, Series
 
 
 @dataclass(frozen=True)
@@ -57,9 +67,39 @@ def _trades(market: Market, rows: pd.DataFrame) -> Iterator[Trade]:
         )
 
 
+def _book_1s(market: Market, rows: pd.DataFrame) -> Iterator[BookSnapshot]:
+    """Wide rows back into best-first level tuples; NULL (NaN) levels are dropped."""
+    levels = range(1, BOOK_DEPTH + 1)
+    sides = {
+        side: (
+            rows[[f"{side}_price_{i}" for i in levels]].to_numpy(),
+            rows[[f"{side}_qty_{i}" for i in levels]].to_numpy(),
+        )
+        for side in ("bid", "ask")
+    }
+    for n, time in enumerate(rows["time"]):
+        yield BookSnapshot(
+            market=market,
+            time=time.to_pydatetime(),
+            bids=_levels(sides["bid"][0][n], sides["bid"][1][n]),
+            asks=_levels(sides["ask"][0][n], sides["ask"][1][n]),
+        )
+
+
+def _levels(prices, quantities) -> tuple[BookLevel, ...]:
+    return tuple(
+        BookLevel(float(p), float(q))
+        for p, q in zip(prices, quantities, strict=True)
+        if not math.isnan(p)
+    )
+
+
 SOURCES: dict[str, ReplaySource] = {
     KLINES_1M.name: ReplaySource(_klines, delay=KLINES_1M.interval),
     TRADES.name: ReplaySource(_trades, delay=timedelta(0)),
+    BOOK_1S.name: ReplaySource(_book_1s, delay=timedelta(0)),
+    # The gap log (`gaps`) is not a market event; backtests read it through
+    # `DatasetStore.read(..., GAPS)` to mask intervals without data.
 }
 
 
