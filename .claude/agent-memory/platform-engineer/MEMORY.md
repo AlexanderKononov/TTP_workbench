@@ -2,3 +2,4 @@
 - [Tooling gotchas](tooling-gotchas.md) — slow git --ignored locks index; uv sync prunes root .venv; CliRunner prog_name; DuckDB default connection not thread-safe; worktree sandbox refusals
 - [Venue API quirks](venue-api-quirks.md) — MEXC REST/WebSocket gotchas (weights, protobuf streams, version rules, refused-subscribe ack), no MEXC amend, ccxt book bug, Hyperliquid limits
 - [Tooling gotchas](tooling-gotchas.md) — slow git --ignored locks index; uv sync prunes root .venv; CliRunner prog_name; cp1252 console; worktree Bash refusals; fake-socket test hangs
+- [Telegram and secrets how-to](telegram-and-secrets-howto.md) — uv --env-file for live checks from worktrees; httpx logs the bot token; Telegram limits; test cross-imports
