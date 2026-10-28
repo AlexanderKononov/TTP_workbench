@@ -1,6 +1,6 @@
 # Spec: Initial infrastructure (M0–M6)
 
-Status: awaiting Owner approval (gate 1)
+Status: approved by Owner (gate 1); M0-M2 tickets approved (gate 3)
 Decisions: ADR-0002, 0004, 0005, 0006, 0007 · Structure: `docs/architecture.md` · Terms: `GLOSSARY.md`
 Research: [venue-research.md](venue-research.md), [venue-dev-ease.md](venue-dev-ease.md)
 
