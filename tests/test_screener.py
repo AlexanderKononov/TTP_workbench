@@ -17,6 +17,7 @@ from ttp.screener.report import candle_chart
 from ttp.screener.wicks import (
     COLUMNS,
     EVENT_COLUMNS,
+    MIN_ACTIVE_SHARE,
     MIN_EVENTS,
     MIN_WICK_TO_BASE,
     rank,
@@ -35,13 +36,16 @@ START_MS = int(START.timestamp() * 1000)
 DAY = 24 * 60
 
 
+BASE_DIP = 0.001  # every fixture candle trades `BASE_DIP` below its open: active
+
+
 def row(open_ms: int, price: float, high: float, volume: float = 10.0) -> list:
     p = str(price)
     return [
         open_ms,
         p,
         str(high),
-        p,
+        str(price * (1 - BASE_DIP)),
         p,
         str(volume),
         open_ms + MIN_MS,
@@ -50,7 +54,8 @@ def row(open_ms: int, price: float, high: float, volume: float = 10.0) -> list:
 
 
 def series(n: int, wicks: dict[int, float], price: float = 1.0) -> list[list]:
-    """Flat 1m candles from START; minute i gets an upper wick of `wicks[i]`."""
+    """Active 1m candles from START (a 0.1% dip below the open, close at the open);
+    minute i gets an upper wick of `wicks[i]`."""
     return [
         row(START_MS + i * MIN_MS, price, price * (1 + wicks.get(i, 0.0)))
         for i in range(n)
@@ -122,6 +127,21 @@ def gap_prints(n: int = DAY, every: int = 30) -> list[list]:
     return rows
 
 
+def sparse_prints(n: int = DAY, every: int = 30, active_every: int = 5) -> list[list]:
+    """Most minutes print nothing (flat candle at the last price); one minute in
+    `active_every` trades a little, and every `every` minutes a single print at
+    1.06 returns at once. A returned, regular, "calm" series with an empty base."""
+    rows = []
+    for i in range(n):
+        if i % every == 15:
+            rows.append(candle(i, 1.0, 1.06, 1.0, 1.0))
+        elif i % active_every == 0:
+            rows.append(candle(i, 1.0, 1.001, 0.999, 1.0))
+        else:
+            rows.append(candle(i, 1.0, 1.0, 1.0, 1.0))
+    return rows
+
+
 def calm_sweeps(n: int = DAY, every: int = 45, seed: int = 3) -> list[list]:
     """A calm zone (noise within +-0.3%) swept 6% up every `every` minutes,
     closing most of the way back (retrace ~0.93)."""
@@ -149,6 +169,8 @@ def test_periodic_wicks_are_counted_sized_and_regular():
     assert s.wick_max == pytest.approx(0.05)
     assert s.interval_median_min == 30
     assert s.regularity == pytest.approx(1.0)
+    assert s.base_range == pytest.approx(BASE_DIP)
+    assert s.active_share == 1.0
     assert s.score == pytest.approx(48 * 0.05 * 2)
 
 
@@ -193,6 +215,7 @@ def test_adjacent_spike_minutes_are_one_event():
 def test_empty_series_has_zero_stats():
     s = wick_stats(frame([]), min_wick=0.02)
     assert (s.candles, s.wick_count, s.score) == (0, 0, 0.0)
+    assert pd.isna(s.base_range) and pd.isna(s.active_share)
 
 
 def test_ranking_is_deterministic_and_prefers_big_regular_wicks():
@@ -252,8 +275,27 @@ def test_gap_single_prints_score_zero():
     assert s.returned_events == 48  # every print returns...
     assert s.regularity == pytest.approx(1.0)  # ...on schedule...
     assert s.base_range == pytest.approx(0.04 / 1.04, rel=0.05)
+    assert s.active_share == 1.0  # every base minute trades...
     assert s.wick_median < MIN_WICK_TO_BASE * s.base_range  # ...but is not a sweep
     assert s.score == 0.0
+
+
+def test_sparse_prints_score_zero():
+    """Flat minutes are not a calm base: the active-share gate alone stops the score."""
+    s = wick_stats(frame(sparse_prints()), min_wick=0.02)
+    assert s.returned_events == s.wick_count == 48  # every print returns...
+    assert s.regularity == pytest.approx(1.0)  # ...on schedule...
+    assert s.base_range == 0.0  # ...over a base that mostly does not trade
+    assert s.wick_median >= MIN_WICK_TO_BASE * s.base_range  # v2 gate is vacuous
+    assert s.active_share == pytest.approx(240 / (DAY - 48))
+    assert s.active_share < MIN_ACTIVE_SHARE
+    assert s.score == 0.0
+    # The same prints over a base that trades every minute do score.
+    active = [
+        candle(i, 1.0, 1.001, 0.999, 1.0) if r[2] == "1.0" else r
+        for i, r in enumerate(sparse_prints())
+    ]
+    assert wick_stats(frame(active), min_wick=0.02).score > 0
 
 
 def test_burst_of_returned_sweeps_is_one_episode():
@@ -268,6 +310,7 @@ def test_calm_zone_with_returned_sweeps_scores_and_ranks_first():
     assert s.returned_events == s.wick_count == 32
     assert s.retrace_median == pytest.approx(0.056 / 0.06)
     assert 0.002 < s.base_range < 0.008  # noise, far below the 5.6% sweeps
+    assert s.active_share == 1.0
     assert s.interval_median_min == 45 and s.regularity == pytest.approx(1.0)
     assert s.score == pytest.approx(32 * s.wick_median * 2)
 
@@ -275,6 +318,7 @@ def test_calm_zone_with_returned_sweeps_scores_and_ranks_first():
         "CTRL": random_walk(),
         "TREND": trending_steps(),
         "GAP": gap_prints(),
+        "SPARSE": sparse_prints(),
         "SMALL": periodic(0.03),
         "CALM": calm_sweeps(),
     }
@@ -285,8 +329,15 @@ def test_calm_zone_with_returned_sweeps_scores_and_ranks_first():
         ]
     )
     assert list(table.columns) == COLUMNS
-    assert table["market"].tolist() == ["CALM", "SMALL", "GAP", "TREND", "CTRL"]
-    assert table["score"].tolist()[2:] == [0.0, 0.0, 0.0]
+    assert table["market"].tolist() == [
+        "CALM",
+        "SMALL",
+        "GAP",
+        "SPARSE",
+        "TREND",
+        "CTRL",
+    ]
+    assert table["score"].tolist()[2:] == [0.0, 0.0, 0.0, 0.0]
 
 
 def test_candle_chart_writes_png(tmp_path):
@@ -368,7 +419,8 @@ def test_screen_ranks_universe_and_writes_report(tmp_path):
     assert stats.loc[0, "wick_count"] == 48
     assert stats.loc[0, "returned_events"] == 48
     assert stats.loc[0, "retrace_median"] == pytest.approx(1.0)
-    assert stats.loc[0, "base_range"] == 0.0
+    assert stats.loc[0, "base_range"] == pytest.approx(BASE_DIP)
+    assert stats.loc[0, "active_share"] == 1.0
     assert stats.loc[0, "wick_median"] == pytest.approx(0.10)
     assert stats.loc[0, "interval_median_min"] == 30
     assert stats.loc[0, "regularity"] == pytest.approx(1.0)
@@ -378,13 +430,19 @@ def test_screen_ranks_universe_and_writes_report(tmp_path):
     report = (out / "report.md").read_text(encoding="utf-8")
     assert "DEBUSDT" not in report  # `st` market excluded by default
     assert "charts/01-ADXUSDT.png" in report
-    assert "| Returned | Events | Typical wick | Retrace | Base range |" in report
-    assert "| 1 | ADXUSDT | 9.60 | 48 | 48 | 10.00% | 100.00% | 0.00% |" in report
+    assert "| Returned | Events | Typical wick | Retrace | Base range | Active |" in (
+        report
+    )
+    assert "| 1 | ADXUSDT | 9.60 | 48 | 48 | 10.00% | 100.00% | 0.10% | 100.00% |" in (
+        report
+    )
+    assert "charts show the last 24 h" in report  # default --chart-hours
     assert "2026-10-27 12:00" in report and "2026-10-28 12:00" in report
     assert "DEBUSDT" not in result.output
-    assert "RETURNED EVENTS    WICK RETRACE    BASE" in result.output
-    assert "ADXUSDT           9.60       48     48  10.00% 100.00%   0.00%" in (
-        result.output
+    assert "RETURNED EVENTS    WICK RETRACE    BASE  ACTIVE" in result.output
+    assert (
+        "ADXUSDT           9.60       48     48  10.00% 100.00%   0.10% 100.00%"
+        in result.output
     )
 
 
