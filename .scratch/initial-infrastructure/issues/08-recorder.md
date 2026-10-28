@@ -2,7 +2,7 @@
 
 **Role:** platform-engineer
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Blocked by:** 05, 06, 07
 
@@ -10,8 +10,26 @@
 
 Spec: [../spec.md](../spec.md)
 
-- [ ] `ttp record start <dataset>` records all dataset markets; `ttp record stop <dataset>` (or Ctrl-C) stops cleanly; `ttp record status` shows what is running
-- [ ] Trades and 1 s top-20 snapshots written to the dataset's Parquet partitions, readable by the DuckDB reader
-- [ ] Gap log records disconnects, resyncs and missing intervals
-- [ ] Auto-reconnect with backoff; Telegram alert via the notify module if a market stays disconnected beyond a threshold
-- [ ] Tested with a fake feed; a short opt-in live run on one market is documented
+- [x] `ttp record start <dataset>` records all dataset markets; `ttp record stop <dataset>` (or Ctrl-C) stops cleanly; `ttp record status` shows what is running
+- [x] Trades and 1 s top-20 snapshots written to the dataset's Parquet partitions, readable by the DuckDB reader
+- [x] Gap log records disconnects, resyncs and missing intervals
+- [x] Auto-reconnect with backoff; Telegram alert via the notify module if a market stays disconnected beyond a threshold
+- [x] Tested with a fake feed; a short opt-in live run on one market is documented
+
+## Comments
+
+platform-engineer, 2026-10-28:
+
+- **Layout:** `src/ttp/data/recorder.py` holds `Session` (pure: fed `LiveBooks.events()` items and clock ticks, buffers rows, tracks sync state, decides alerts) and `Recorder` (runtime: one thread per WebSocket connection, one sampler thread on the whole-second grid, the calling thread flushing, heartbeating and polling the stop file). Reconnect with backoff and resync stay in the venue connector (ticket 07); the recorder only logs what `LiveBooks` reports. Markets are split over connections of 15 (`MAX_SUBSCRIPTIONS // 2`) in dataset order; one `MexcClient` (thread-safe limiter) serves every connection's snapshots.
+- **New data types** (`src/ttp/data/store.py`): `book_1s` and `gaps`, registered in `DATA_TYPES`, so `dataset show`, the card and `store.gaps()` pick them up unchanged.
+  - `book_1s` is **wide**: `time`, `version` (venue book version at the sample) and `bid_price_n`, `bid_qty_n`, `ask_price_n`, `ask_qty_n` for n = 1..20 (82 columns), one row per second per market, `interval = 1 s` so `store.gaps()` lists missing seconds. Chosen over a long layout (one row per level with a `level` column) because the backtest's question is "best N levels at time t": wide answers it with one row and a projection of 4N columns (DuckDB reads only projected column chunks from Parquet), long needs 40x the rows plus a `level <= N` filter and a pivot. Compression favours wide too: a level's price column barely changes between seconds, so it RLE/dictionary-encodes to almost nothing. Levels a thin book lacks are NULL (NaN on read). Sample time is the recorder's clock (whole seconds, UTC), not venue time.
+  - `gaps`: `time`, `kind`, `until`, `detail`, keyed on all but `until`. `kind` is every `BookEvent` kind (`synced`, `gap`, `stale_snapshot`, `snapshot_failed`, `disconnected`) plus `start`/`stop` (session boundaries), `stream_error` (a `StreamStatus` error, written for every market on that connection) and `missing` (an interval `[time, until)` without a synced book, closed on the next sync or at stop). Event rows carry venue time when the push had one, else the recorder's clock.
+  - `DataType.timestamp_columns` added so every TIMESTAMP column (not only the time column) is stored naive UTC and returned tz-aware (`until` needed it).
+- **Writes:** `DatasetStore.append()` merges buffered rows into hourly `part-HH.parquet` files inside the date partition (dedup by key within the hour), so a flush rewrites at most one hour of one series rather than the whole day; the reader already unions every file of a partition. `write()` (downloads) keeps merging into `data.parquet`. A row's file follows from its time, so a key is deduplicated within its file. Flush every 60 s (`--flush-interval`) in the main thread and on stop; sampling runs in its own thread so a slow flush never costs a sample.
+- **Replay** (`src/ttp/feeds/replay.py`): `SOURCES["book_1s"]` turns wide rows into `core.BookSnapshot` (NULL levels dropped, best-first tuples). No source for `gaps`: it is not a market event and `core` has no gap type; a backtest reads it with `store.read(..., GAPS)` to mask intervals. If M3's simulated broker needs to see gaps in-stream, that is a `core` event for quant-engineer to add (QUESTION FOR OWNER / M3: should missing intervals reach the strategy as an event?).
+- **Start/stop/status across processes:** `record start` writes `data/datasets/<dataset>/recorder.json` (pid, start, markets, synced, rows written) on start, every 10 s and at each flush; `record stop` touches `recorder.stop`, which the loop polls each second, then waits for the run file to vanish; `record status` lists run files and marks one *stale* when its heartbeat is older than 30 s (`ttp record stop` clears a stale file). Deliberately no `os.kill(pid, 0)` liveness probe: on Windows `os.kill` with any signal other than Ctrl events calls `TerminateProcess`. `record start` refuses a dataset with a live run file.
+- **Alerts:** `Session.alerts(now)` returns one message per outage listing every market unsynced for over `--alert-after` (default 120 s) and one on recovery; sent through `TelegramNotifier.send_text` with the dev bot from `TELEGRAM_DEV_BOT_TOKEN` / `TELEGRAM_DEV_CHAT_ID` (environment or `.env`), else a warning at start and alerts on stdout only. A failed send is logged and never stops recording.
+- **Trade history overlap:** recorded trades (ms time, one row per print) and downloaded `aggTrades` (second resolution, aggregated) share the `trades` series. `download_trades` resumes from the last stored print, so re-running `dataset approve` after recording started adds at most the seam second twice; noted in the card quirks. Avoid running `dataset approve` downloads while the same dataset records.
+- **Tests** (`tests/test_recorder.py`, no network): `Session` through a real `LiveBooks` on scripted diffs/trades/gap (row contents, gap log order, `missing` intervals, NULL levels, 82 columns); alerts once per outage and on recovery; 31 markets -> 3 connections; `Recorder` with real threads on the captured ADX frames (`HoldingSocket` keeps the fake connection open so a whole second passes synced) writing hourly parts and cleaning up the run file; stop-file round trip; stale run file cleared; replay of `book_1s` as `BookSnapshot`; `append` hour merge alongside a `data.parquet`; `ttp record start/stop/status` through `CliRunner`.
+- **Live run (opt-in, 2026-10-28):** `uv run pytest -m live -k live_record` records BTCUSDT for 60 s into a temp store: passed in 64.8 s (>= 50 book rows, bid < ask on every row, all 20 levels filled, trades present, gap log `start, missing, synced, ..., stop`, no missing seconds). CLI run from a scratch directory with a dataset of BTCUSDT + `NOPEUSDT` (bogus) and `--seconds 60 --flush-interval 20 --alert-after 10`: BTCUSDT synced 1.9 s after start; NOPEUSDT got `snapshot_failed` (`HTTP 400: Invalid symbol. (code -1121)`) and the stall alert fired at 10 s (stdout, Telegram not configured there); flushes at 20/40/60 s plus on stop wrote 309 trades, 58 book rows, 8 gap rows into `part-11.parquet` files; `ttp dataset show` lists the three series; a DuckDB "best 5 levels at t" projection over the book file returns the expected 20 columns. Output stayed in the scratch directory, nothing committed.
+- **Not done / later:** no daily compaction of hourly parts (24 files per series-day is fine for DuckDB; add if reads slow down); series still load fully for replay (ticket 10's note); the recorder is one process per dataset, no supervisor or auto-restart (VPS move is a later decision).
