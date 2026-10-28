@@ -222,3 +222,6 @@ archive/data/metadata.db
 
 # Ad-hoc dataset cards are scratch; cards for approved datasets are committed
 docs/knowledge-base/datasets/adhoc*.md
+
+# Agent worktrees
+.claude/worktrees/

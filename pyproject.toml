@@ -32,7 +32,7 @@ markers = ["live: hits real venue endpoints over the network (opt in: -m live)"]
 [tool.ruff]
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = ["archive"]
+extend-exclude = ["archive", ".claude/worktrees"]
 
 [tool.ruff.lint]
 extend-select = ["I"]
